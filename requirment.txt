@@ -1,0 +1,48 @@
+EchoAI Frontend Requirements
+
+Project base:
+- Framework: Next.js 14 + TypeScript + Tailwind CSS
+- UI style: Dark dashboard theme with consistent design tokens
+- Icon library: lucide-react
+
+Primary objective:
+- Build all agreed product screens in phased order with reusable components.
+
+Screens backlog:
+1. Landing page
+2. Signup and login screens
+3. Agent dashboard
+4. Live call cockpit
+5. Supervisor dashboard
+6. Onboarding wizard
+7. Authentication
+8. Persona engine
+9. Analytics dashboard
+10. Lead scoring
+11. Objection library
+12. Alerts and objection monitor
+13. CRM and lead management
+14. Call review and QA
+15. Security and admin
+16. Lead detail
+17. Reports and exports
+18. Smart followups
+19. System states
+20. Alerts and objection detection
+
+Implementation rules:
+1. Use only `echoai/` as active code folder.
+2. Keep reusable components in `src/components`.
+3. Keep page-level screens in logical folders under `src`.
+4. Reuse shared sidebar/header/cards wherever possible.
+5. Maintain exact visual parity with approved design references.
+
+Quality requirements:
+1. No TypeScript errors.
+2. Consistent spacing/color/typography tokens.
+3. Responsive behavior for desktop and laptop widths.
+4. All key screens have loading/empty/error states.
+5. Keep components clean and ready for repo commits.
+
+Handoff note:
+- Detailed phase plan is documented in `docs/IMPLEMENTATION-PHASES.md`.
