@@ -16,6 +16,7 @@ export function AuthCard({
   subtitle,
   role,
   onRoleChange,
+  showRoleSelector = true,
   children,
   error,
   ctaLabel,
@@ -26,6 +27,7 @@ export function AuthCard({
   subtitle: string;
   role: UserRole;
   onRoleChange: (role: UserRole) => void;
+  showRoleSelector?: boolean;
   children: ReactNode;
   error?: string;
   ctaLabel: string;
@@ -40,28 +42,30 @@ export function AuthCard({
           <p className="mt-2 text-[14px] leading-6 text-white/48">{subtitle}</p>
         </div>
 
-        <div className="mt-6 grid grid-cols-3 gap-2 rounded-[18px] border border-white/[0.06] bg-[#0f1119] p-2">
-          {(Object.keys(roleMeta) as UserRole[]).map((item) => {
-            const active = role === item;
+        {showRoleSelector ? (
+          <div className="mt-6 grid grid-cols-3 gap-2 rounded-[18px] border border-white/[0.06] bg-[#0f1119] p-2">
+            {(Object.keys(roleMeta) as UserRole[]).map((item) => {
+              const active = role === item;
 
-            return (
-              <button
-                key={item}
-                type="button"
-                onClick={() => onRoleChange(item)}
-                className={[
-                  "rounded-[14px] border px-2 py-3 text-left transition-all duration-200",
-                  active
-                    ? "border-[#8f92ff]/35 bg-[#2b2c3c] text-white shadow-[0_0_18px_rgba(143,146,255,0.16)]"
-                    : "border-transparent bg-transparent text-white/55 hover:bg-white/[0.04] hover:text-white/78",
-                ].join(" ")}
-              >
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em]">{roleMeta[item].label}</div>
-                <div className="mt-1 text-[10px] text-white/38">{roleMeta[item].short}</div>
-              </button>
-            );
-          })}
-        </div>
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => onRoleChange(item)}
+                  className={[
+                    "rounded-[14px] border px-2 py-3 text-left transition-all duration-200",
+                    active
+                      ? "border-[#8f92ff]/35 bg-[#2b2c3c] text-white shadow-[0_0_18px_rgba(143,146,255,0.16)]"
+                      : "border-transparent bg-transparent text-white/55 hover:bg-white/[0.04] hover:text-white/78",
+                  ].join(" ")}
+                >
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em]">{roleMeta[item].label}</div>
+                  <div className="mt-1 text-[10px] text-white/38">{roleMeta[item].short}</div>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
         {error ? (
           <div className="mt-5 flex items-start gap-3 rounded-[16px] border border-[#ff8aa1]/18 bg-[#40212e]/42 px-4 py-3 text-[13px] text-[#ffd3de]">

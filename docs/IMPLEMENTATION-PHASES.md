@@ -2,6 +2,9 @@
 
 This file explains what to build first, what depends on what, and how to split work between team members.
 
+Note:
+`Onboarding wizard` and `CRM / Lead Management` are still part of the EchoAI implementation plan. Their current frontend code has been removed temporarily, but they remain in scope for a later build pass.
+
 ## Phase 1: Access and Lead Foundation
 Goal: Make the product usable from first visit to lead handling.
 

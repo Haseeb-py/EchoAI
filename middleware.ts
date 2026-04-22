@@ -5,7 +5,11 @@ import { canAccessPath, decodeRoleFromToken, isTokenExpired } from "@/lib/auth";
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  if (!pathname.startsWith("/dashboard") && !pathname.startsWith("/supervisor") && !pathname.startsWith("/admin")) {
+  if (
+    !pathname.startsWith("/dashboard") &&
+    !pathname.startsWith("/supervisor") &&
+    !pathname.startsWith("/admin")
+  ) {
     return NextResponse.next();
   }
 

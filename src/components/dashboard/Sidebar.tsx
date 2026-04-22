@@ -1,5 +1,6 @@
- "use client";
+"use client";
 
+import Link from "next/link";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -7,8 +8,6 @@ import {
   LogOut,
   HelpCircle,
   LayoutDashboard,
-  Mic,
-  PhoneCall,
   Settings,
   UserCircle2,
   Users,
@@ -18,22 +17,17 @@ import { clearAuthSession } from "@/lib/auth";
 const sidebarIcons = [
   {
     key: "grid",
+    href: "/dashboard",
     icon: <LayoutDashboard size={16} strokeWidth={1.9} aria-hidden="true" />,
   },
   {
-    key: "pulse",
-    icon: <Mic size={16} strokeWidth={1.9} aria-hidden="true" />,
-  },
-  {
-    key: "contacts",
-    icon: <PhoneCall size={16} strokeWidth={1.9} aria-hidden="true" />,
-  },
-  {
     key: "analytics",
+    href: "/supervisor",
     icon: <BarChart2 size={16} strokeWidth={1.9} aria-hidden="true" />,
   },
   {
     key: "users",
+    href: "/admin",
     icon: <Users size={16} strokeWidth={1.9} aria-hidden="true" />,
   },
 ];
@@ -44,10 +38,10 @@ interface SidebarProps {
   activeKey?: SidebarIconKey;
 }
 
-function SidebarButton({ active, icon }: { active?: boolean; icon: ReactNode }) {
+function SidebarButton({ active, icon, href }: { active?: boolean; icon: ReactNode; href: string }) {
   return (
-    <button
-      type="button"
+    <Link
+      href={href}
       className={[
         "relative grid h-10 w-10 place-items-center rounded-[10px] border transition-all duration-200",
         active
@@ -58,7 +52,7 @@ function SidebarButton({ active, icon }: { active?: boolean; icon: ReactNode }) 
     >
       {icon}
       {active ? <span className="absolute -right-[1px] h-7 w-[2px] rounded-full bg-[#b2b7ff]" /> : null}
-    </button>
+    </Link>
   );
 }
 
@@ -114,7 +108,7 @@ export default function Sidebar({ activeKey = "grid" }: SidebarProps) {
 
       <div className="flex flex-1 flex-col items-center gap-4">
         {sidebarIcons.map((item) => (
-          <SidebarButton key={item.key} active={item.key === activeKey} icon={item.icon} />
+          <SidebarButton key={item.key} active={item.key === activeKey} icon={item.icon} href={item.href} />
         ))}
       </div>
 

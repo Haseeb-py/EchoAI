@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { Button, IconButton } from "@/components/ui/Button";
+import { Button } from "@/components/ui/Button";
 import { Badge, Card, SearchInput } from "@/components/ui/ui-components";
 import Sidebar from "@/components/dashboard/Sidebar";
 import {
@@ -120,15 +120,15 @@ export default function AgentDashboard() {
                 <span className="h-1.5 w-1.5 rounded-full bg-[#B5B6FF] shadow-[0_0_8px_rgba(181,182,255,0.8)]" />
                 AI STATUS: OPTIMAL
               </span>
-              <IconButton className="!h-8 !w-8 !rounded-[9px] !border !border-white/10 !bg-white/[0.03]">
+              <button type="button" className="grid h-8 w-8 place-items-center rounded-[9px] border border-white/10 bg-white/[0.03] text-white/75">
                 <Bell size={15} strokeWidth={2} aria-hidden="true" />
-              </IconButton>
-              <IconButton className="!h-8 !w-8 !rounded-[9px] !border !border-white/10 !bg-white/[0.03]">
+              </button>
+              <button type="button" className="grid h-8 w-8 place-items-center rounded-[9px] border border-white/10 bg-white/[0.03] text-white/75">
                 <AudioWaveform size={15} strokeWidth={2} aria-hidden="true" />
-              </IconButton>
-              <IconButton className="!h-8 !w-8 !rounded-[9px] !border !border-white/10 !bg-white/[0.03]">
+              </button>
+              <button type="button" className="grid h-8 w-8 place-items-center rounded-[9px] border border-white/10 bg-white/[0.03] text-white/75">
                 <Plus size={15} strokeWidth={2} aria-hidden="true" />
-              </IconButton>
+              </button>
               <Button
                 variant="outlined"
                 size="sm"

@@ -14,7 +14,11 @@ export interface LoginPayload {
 
 export interface SignupPayload {
   name: string;
+  companyName?: string;
+  companyDescription?: string;
   email: string;
+  phoneNumber?: string;
+  country?: string;
   password: string;
   role?: UserRole;
 }
@@ -279,9 +283,6 @@ export async function signupWithPassword(payload: SignupPayload): Promise<Signup
 
   return {
     success: true,
-    message:
-      payload.role && payload.role !== "agent"
-        ? "Account request submitted. Elevated roles still require backend approval."
-        : "Account created successfully.",
+    message: payload.role === "admin" ? "Admin account created successfully." : "Account created successfully.",
   };
 }
