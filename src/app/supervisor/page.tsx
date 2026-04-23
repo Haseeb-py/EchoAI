@@ -1,5 +1,5 @@
-import ProtectedLanding from "@/components/auth/ProtectedLanding";
+import SupervisorDashboardPage from "@/components/supervisor/SupervisorDashboardPage";
 
 export default function SupervisorPage() {
-  return <ProtectedLanding role="supervisor" />;
+  return <SupervisorDashboardPage />;
 }
