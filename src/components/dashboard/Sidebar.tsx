@@ -18,16 +18,19 @@ const sidebarIcons = [
   {
     key: "grid",
     href: "/dashboard",
+    label: "Agent Dashboard",
     icon: <LayoutDashboard size={16} strokeWidth={1.9} aria-hidden="true" />,
   },
   {
     key: "analytics",
     href: "/supervisor",
+    label: "Supervisor",
     icon: <BarChart2 size={16} strokeWidth={1.9} aria-hidden="true" />,
   },
   {
     key: "users",
     href: "/admin",
+    label: "Admin Setup",
     icon: <Users size={16} strokeWidth={1.9} aria-hidden="true" />,
   },
 ];
@@ -38,12 +41,14 @@ interface SidebarProps {
   activeKey?: SidebarIconKey;
 }
 
-function SidebarButton({ active, icon, href }: { active?: boolean; icon: ReactNode; href: string }) {
+function SidebarButton({ active, icon, href, label }: { active?: boolean; icon: ReactNode; href: string; label: string }) {
   return (
     <Link
       href={href}
+      title={label}
+      aria-label={label}
       className={[
-        "relative grid h-10 w-10 place-items-center rounded-[10px] border transition-all duration-200",
+        "group relative grid h-10 w-10 place-items-center rounded-[10px] border transition-all duration-200",
         active
           ? "border-[#6971d6] bg-[#30385f] text-[#cfd1ff] shadow-[0_0_14px_rgba(113,118,255,0.22)]"
           : "border-white/[0.08] bg-white/[0.02] text-white/70 hover:border-white/[0.14] hover:bg-white/[0.05] hover:text-white/88",
@@ -52,6 +57,9 @@ function SidebarButton({ active, icon, href }: { active?: boolean; icon: ReactNo
     >
       {icon}
       {active ? <span className="absolute -right-[1px] h-7 w-[2px] rounded-full bg-[#b2b7ff]" /> : null}
+      <span className="pointer-events-none absolute left-[48px] z-50 hidden whitespace-nowrap rounded-[9px] border border-white/10 bg-[#171b28]/96 px-2.5 py-1.5 text-[11px] font-semibold tracking-[0.08em] text-white/78 shadow-[0_14px_28px_rgba(5,6,12,0.36)] group-hover:block">
+        {label}
+      </span>
     </Link>
   );
 }
@@ -108,7 +116,13 @@ export default function Sidebar({ activeKey = "grid" }: SidebarProps) {
 
       <div className="flex flex-1 flex-col items-center gap-4">
         {sidebarIcons.map((item) => (
-          <SidebarButton key={item.key} active={item.key === activeKey} icon={item.icon} href={item.href} />
+          <SidebarButton
+            key={item.key}
+            active={item.key === activeKey}
+            icon={item.icon}
+            href={item.href}
+            label={item.label}
+          />
         ))}
       </div>
 

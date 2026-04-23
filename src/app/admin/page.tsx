@@ -1,5 +1,5 @@
-import ProtectedLanding from "@/components/auth/ProtectedLanding";
+import AdminOverview from "@/components/admin/AdminOverview";
 
 export default function AdminPage() {
-  return <ProtectedLanding role="admin" />;
+  return <AdminOverview />;
 }

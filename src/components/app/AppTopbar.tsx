@@ -4,10 +4,10 @@ import { Button, IconButton } from "@/components/ui/Button";
 import { SearchInput } from "@/components/ui/ui-components";
 
 const navItems = [
-  { label: "HOME", href: "/" },
-  { label: "DASHBOARD", href: "/dashboard" },
-  { label: "SUPERVISOR", href: "/supervisor" },
-  { label: "ADMIN", href: "/admin" },
+  { label: "HOME", href: "/", helper: "Landing page" },
+  { label: "AGENT DASHBOARD", href: "/dashboard", helper: "Agent operations" },
+  { label: "SUPERVISOR", href: "/supervisor", helper: "Live oversight" },
+  { label: "ADMIN SETUP", href: "/admin", helper: "Scripts and personas" },
 ] as const;
 
 export default function AppTopbar({ activeHref }: { activeHref: string }) {
@@ -22,6 +22,7 @@ export default function AppTopbar({ activeHref }: { activeHref: string }) {
           <Link
             key={item.href}
             href={item.href}
+            title={item.helper}
             className={activeHref === item.href ? "text-white/95" : "text-white/48 transition-colors hover:text-white/95"}
           >
             {item.label}
@@ -35,12 +36,15 @@ export default function AppTopbar({ activeHref }: { activeHref: string }) {
           AI STATUS: OPTIMAL
         </span>
         <IconButton className="!h-8 !w-8 !rounded-[9px] !border !border-white/10 !bg-white/[0.03]">
+          <span className="sr-only">View alerts</span>
           <Bell size={15} strokeWidth={2} aria-hidden="true" />
         </IconButton>
         <IconButton className="!h-8 !w-8 !rounded-[9px] !border !border-white/10 !bg-white/[0.03]">
+          <span className="sr-only">View voice status</span>
           <AudioWaveform size={15} strokeWidth={2} aria-hidden="true" />
         </IconButton>
         <IconButton className="!h-8 !w-8 !rounded-[9px] !border !border-white/10 !bg-white/[0.03]">
+          <span className="sr-only">Create new item</span>
           <Plus size={15} strokeWidth={2} aria-hidden="true" />
         </IconButton>
         <Button
