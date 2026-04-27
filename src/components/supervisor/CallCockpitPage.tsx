@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, Mic, MicOff, PhoneOff, ShieldCheck, Send, Users } from "lucide-react";
-import { SupervisorScreenShell } from "@/components/supervisor/SupervisorScreenShell";
 import { Badge, Card, ProgressBar } from "@/components/ui/ui-components";
 import { formatLiveCallDuration, getLiveCallScriptProgress, liveCallSentimentLabel, liveCallStatusLabel, LIVE_CALL_SCRIPT_FLOW, useSupervisorLiveCalls } from "@/components/supervisor/live-calls";
 import {
@@ -66,7 +65,13 @@ function createTranscriptMessage(call: LiveCallItem, speaker: LiveCallTranscript
   };
 }
 
-export default function CallCockpitPage({ callId }: { callId: string }) {
+export default function CallCockpitPage({ 
+  callId, 
+  role = "supervisor" 
+}: { 
+  callId: string
+  role?: "supervisor" | "agent"
+}) {
   const router = useRouter();
   const [calls, setCalls] = useSupervisorLiveCalls();
   const [whisperDraft, setWhisperDraft] = useState("");
@@ -219,13 +224,7 @@ export default function CallCockpitPage({ callId }: { callId: string }) {
 
   if (!call) {
     return (
-      <SupervisorScreenShell
-        activeKey="activity"
-        contextLabel="Live Call Cockpit"
-        eyebrow="Supervisor / Live Call"
-        title="Call not found"
-        description="The requested call is no longer active or the cockpit has not been initialized yet."
-      >
+      <div className="space-y-4">
         <Card className="!rounded-[18px] !border-white/[0.06] !bg-[#111420] !p-5">
           <div className="text-[14px] text-white/68">This live call is no longer available in the local supervisor store.</div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -238,18 +237,12 @@ export default function CallCockpitPage({ callId }: { callId: string }) {
             </Link>
           </div>
         </Card>
-      </SupervisorScreenShell>
+      </div>
     );
   }
 
   return (
-    <SupervisorScreenShell
-      activeKey="activity"
-      contextLabel="Live Call Cockpit"
-      eyebrow="Supervisor / Live Call"
-      title={`Call Cockpit · ${call.agentName}`}
-      description="Watch the call in motion, whisper to the AI, intervene when needed, and end the session with the outcome captured locally."
-    >
+    <>
       <p className="mb-4 rounded-[12px] border border-white/[0.06] bg-white/[0.025] px-4 py-3 text-[12px] text-white/60">{statusMessage}</p>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
@@ -329,28 +322,28 @@ export default function CallCockpitPage({ callId }: { callId: string }) {
         </Card>
 
         <Card className="!rounded-[18px] !border-white/[0.06] !bg-[#111420] !p-5">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/38">Supervisor Controls</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/38">{role === "supervisor" ? "Supervisor Controls" : "Call Controls"}</div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={handleJoin} className={solidButton}><ShieldCheck size={14} /> Join Call</button>
-            <button type="button" onClick={handleLeave} className={ghostButton}><MicOff size={14} /> Leave Call</button>
-            <button type="button" onClick={handleIntervene} className={ghostButton}><Mic size={14} /> Intervene</button>
-            <button type="button" onClick={handleHangUp} className={dangerButton}><PhoneOff size={14} /> Hang Up</button>
+            <button type="button" onClick={handleJoin} className={solidButton}><ShieldCheck size={14} /> {role === "supervisor" ? "Join Call" : "Join"}</button>
+            <button type="button" onClick={handleLeave} className={ghostButton}><MicOff size={14} /> {role === "supervisor" ? "Leave Call" : "Leave"}</button>
+            <button type="button" onClick={handleIntervene} className={ghostButton}><Mic size={14} /> {role === "supervisor" ? "Intervene" : "Speak"}</button>
+            <button type="button" onClick={handleHangUp} className={dangerButton}><PhoneOff size={14} /> {role === "supervisor" ? "Hang Up" : "End Call"}</button>
           </div>
 
           <form onSubmit={handleWhisper} className="mt-4">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/38">Whisper to AI</div>
-            <textarea value={whisperDraft} onChange={(event) => setWhisperDraft(event.target.value)} placeholder="Send a private instruction to the AI agent" className="mt-2 h-28 w-full rounded-[12px] border border-white/[0.08] bg-[#191c28] px-3 py-2 text-[13px] text-white/84 outline-none focus:border-[#b9b7ff]/40" />
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/38">{role === "supervisor" ? "Whisper to AI" : "Message AI"}</div>
+            <textarea value={whisperDraft} onChange={(event) => setWhisperDraft(event.target.value)} placeholder={role === "supervisor" ? "Send a private instruction to the AI agent" : "Send a message to the AI agent"} className="mt-2 h-28 w-full rounded-[12px] border border-white/[0.08] bg-[#191c28] px-3 py-2 text-[13px] text-white/84 outline-none focus:border-[#b9b7ff]/40" />
             <button type="submit" className="mt-2 inline-flex h-10 items-center gap-2 rounded-[10px] bg-[#8fdde0] px-4 text-[11px] font-semibold uppercase tracking-[0.11em] text-[#0f2022] hover:bg-[#a7e6e8]">
-              <Send size={14} /> Send Whisper
+              <Send size={14} /> {role === "supervisor" ? "Send Whisper" : "Send"}
             </button>
           </form>
 
           <div className="mt-4 rounded-[14px] border border-white/[0.06] bg-white/[0.02] p-4 text-[12px] text-white/60">
             <div className="mb-2 flex items-center gap-2 text-white/72">
               <Users size={14} />
-              Supervisor Presence
+              {role === "supervisor" ? "Supervisor Presence" : "Observer Status"}
             </div>
-            <div>{call.isSupervisorJoined ? "Supervisor has joined the live call." : "Supervisor is observing only."}</div>
+            <div>{call.isSupervisorJoined ? role === "supervisor" ? "Supervisor has joined the live call." : "You've joined the call." : role === "supervisor" ? "Supervisor is observing only." : "You're observing only."}</div>
             <div className="mt-3">Current node: {call.currentScriptNode}</div>
           </div>
 
@@ -365,7 +358,7 @@ export default function CallCockpitPage({ callId }: { callId: string }) {
           </div>
         </Card>
       </div>
-    </SupervisorScreenShell>
+    </>
   );
 }
 

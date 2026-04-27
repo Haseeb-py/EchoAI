@@ -144,20 +144,11 @@ export function SupervisorHeader({
 
       <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/42">
         <span className="rounded-full border border-[#8f92ff]/22 bg-[#8f92ff]/10 px-3 py-1 text-[#cfd2ff]">Supervisor Mode</span>
-        <span className="rounded-full border border-[#f6c56f]/20 bg-[#f6c56f]/8 px-3 py-1 text-[#f8dc9b]">{contextLabel}</span>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-white/62">{contextLabel}</span>
         {activeItem ? (
           <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-white/62">{activeItem.label}</span>
         ) : null}
       </div>
-
-      <nav className="ml-auto flex flex-wrap items-center gap-3 text-[11px] font-semibold tracking-[0.14em] text-white/58">
-        <Link href="/dashboard" className="rounded-[8px] border border-white/10 bg-white/[0.03] px-3 py-1.5 text-white/72 hover:bg-white/[0.06]">
-          Agent
-        </Link>
-        <Link href="/admin" className="rounded-[8px] border border-white/10 bg-white/[0.03] px-3 py-1.5 text-white/72 hover:bg-white/[0.06]">
-          Admin
-        </Link>
-      </nav>
     </header>
   );
 }
