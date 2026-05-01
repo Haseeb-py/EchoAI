@@ -25,9 +25,18 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 devserver.log
+devserver.err.log
 
 # local env files
 .env*.local
+
+# backend
+/echoai-backend/.venv
+/echoai-backend/.venv_backend
+/echoai-backend/.env
+/echoai-backend/*.db
+/echoai-backend/**/__pycache__/
+/echoai-backend/**/*.pyc
 
 # vercel
 .vercel
