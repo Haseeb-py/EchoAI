@@ -127,6 +127,7 @@ export function AgentHeader({
   showContextLabel?: boolean;
 }) {
   const activeItem = useMemo(() => agentNavItems.find((item) => item.key === activeKey), [activeKey]);
+  const isDuplicate = contextLabel && activeItem && contextLabel === activeItem.label;
 
   return (
     <header className="flex flex-wrap items-center gap-3 border-b border-white/[0.06] px-5 py-3 md:px-6">
@@ -137,7 +138,7 @@ export function AgentHeader({
       <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/42">
         <span className="rounded-full border border-[#8f92ff]/22 bg-[#8f92ff]/10 px-3 py-1 text-[#cfd2ff]">Agent Mode</span>
         {activeItem ? <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-white/62">{activeItem.label}</span> : null}
-        {showContextLabel ? <span className="rounded-full border border-[#f6c56f]/18 bg-[#f6c56f]/8 px-3 py-1 text-[#f8dc9b]">{contextLabel}</span> : null}
+        {showContextLabel && !isDuplicate ? <span className="rounded-full border border-[#f6c56f]/18 bg-[#f6c56f]/8 px-3 py-1 text-[#f8dc9b]">{contextLabel}</span> : null}
       </div>
     </header>
   );

@@ -135,6 +135,7 @@ export function SupervisorHeader({
   activeKey: SupervisorNavKey;
 }) {
   const activeItem = useMemo(() => supervisorNavItems.find((item) => item.key === activeKey), [activeKey]);
+  const showContextLabel = contextLabel && (!activeItem || contextLabel !== activeItem.label);
 
   return (
     <header className="flex flex-wrap items-center gap-3 border-b border-white/[0.06] px-5 py-3 md:px-6">
@@ -144,9 +145,11 @@ export function SupervisorHeader({
 
       <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/42">
         <span className="rounded-full border border-[#8f92ff]/22 bg-[#8f92ff]/10 px-3 py-1 text-[#cfd2ff]">Supervisor Mode</span>
-        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-white/62">{contextLabel}</span>
         {activeItem ? (
           <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-white/62">{activeItem.label}</span>
+        ) : null}
+        {showContextLabel ? (
+          <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-white/62">{contextLabel}</span>
         ) : null}
       </div>
     </header>
