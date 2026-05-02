@@ -256,20 +256,8 @@ export async function loginWithPassword(
     return apiResponse;
   }
 
-  await wait(550);
-
-  const inferredName = payload.email.split("@")[0]?.replace(/[._-]/g, " ") || "Echo Operator";
-  const user: AuthUser = {
-    id: `demo-${selectedRole}-${Date.now()}`,
-    name: inferredName.replace(/\b\w/g, (char) => char.toUpperCase()),
-    email: payload.email,
-    role: selectedRole,
-  };
-
-  return {
-    token: buildDemoToken(user),
-    user,
-  };
+  // No demo fallback - require real backend authentication
+  throw new Error("Backend authentication failed. Please check your credentials and ensure the backend server is running at http://localhost:8000");
 }
 
 export async function signupWithPassword(payload: SignupPayload): Promise<SignupSuccessResponse> {

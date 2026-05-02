@@ -72,6 +72,8 @@ export default function CallCockpitPage({
   callId: string
   role?: "supervisor" | "agent"
 }) {
+  const getBackLink = () => role === "agent" ? "/dashboard/live" : "/supervisor/activity";
+  const getDashboardLink = () => role === "agent" ? "/dashboard" : "/supervisor";
   const router = useRouter();
   const [calls, setCalls] = useSupervisorLiveCalls();
   const [whisperDraft, setWhisperDraft] = useState("");
@@ -219,7 +221,11 @@ export default function CallCockpitPage({
     }
 
     removeSupervisorLiveCall(call.id);
-    router.push(riskHigh ? "/supervisor/escalations" : "/supervisor/activity");
+    if (role === "agent") {
+      router.push("/dashboard/live");
+    } else {
+      router.push(riskHigh ? "/supervisor/escalations" : "/supervisor/activity");
+    }
   }
 
   if (!call) {
@@ -228,11 +234,11 @@ export default function CallCockpitPage({
         <Card className="!rounded-[18px] !border-white/[0.06] !bg-[#111420] !p-5">
           <div className="text-[14px] text-white/68">This live call is no longer available in the local supervisor store.</div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Link href="/supervisor/activity" className="inline-flex h-10 items-center gap-2 rounded-[10px] bg-[#b9b7ff] px-4 text-[11px] font-semibold uppercase tracking-[0.11em] text-[#20264b] hover:bg-[#c8c6ff]">
+            <Link href={getBackLink()} className="inline-flex h-10 items-center gap-2 rounded-[10px] bg-[#b9b7ff] px-4 text-[11px] font-semibold uppercase tracking-[0.11em] text-[#20264b] hover:bg-[#c8c6ff]">
               <ArrowLeft size={14} />
-              Back to Activity
+              Back to {role === "agent" ? "Calls" : "Activity"}
             </Link>
-            <Link href="/supervisor" className="inline-flex h-10 items-center gap-2 rounded-[10px] border border-white/12 bg-white/[0.03] px-4 text-[11px] font-semibold uppercase tracking-[0.11em] text-white/76 hover:bg-white/[0.06]">
+            <Link href={getDashboardLink()} className="inline-flex h-10 items-center gap-2 rounded-[10px] border border-white/12 bg-white/[0.03] px-4 text-[11px] font-semibold uppercase tracking-[0.11em] text-white/76 hover:bg-white/[0.06]">
               Open Dashboard
             </Link>
           </div>
@@ -348,11 +354,11 @@ export default function CallCockpitPage({
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <Link href="/supervisor/activity" className={linkButton}>
+            <Link href={getBackLink()} className={linkButton}>
               <ArrowLeft size={14} />
-              Back to Activity
+              Back to {role === "agent" ? "Calls" : "Activity"}
             </Link>
-            <Link href="/supervisor" className={linkButton}>
+            <Link href={getDashboardLink()} className={linkButton}>
               Open Dashboard
             </Link>
           </div>
