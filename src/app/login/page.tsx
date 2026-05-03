@@ -13,6 +13,7 @@ export default function LoginPage({
     email?: string;
     registered?: string;
     next?: string;
+    fresh?: string;
   };
 }) {
   return (
@@ -20,6 +21,7 @@ export default function LoginPage({
       initialEmail={searchParams?.email || ""}
       initialRegistered={searchParams?.registered === "1"}
       nextPath={searchParams?.next || ""}
+      fresh={searchParams?.fresh === "1"}
     />
   );
 }

@@ -1,0 +1,55 @@
+@startuml Figure_3_9_Sequence_Script_Persona_Save
+!theme plain
+skinparam defaultFontName Arial
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #3A6BC9
+skinparam sequenceParticipantBackgroundColor #EAF0FB
+skinparam sequenceLifeLineBorderColor #999999
+skinparam databaseBackgroundColor #FFF3E0
+skinparam databaseBorderColor #FB8C00
+
+title Sequence Diagram: Script and Persona Configuration Save
+
+actor "Administrator" as A
+participant "ScriptPersonaSetup\nComponent (React)" as SP
+participant "Next.js\nAPI Proxy" as PROXY
+participant "FastAPI\n/api/admin/scripts\n/api/admin/personas" as FAST
+participant "Pydantic v2\nValidator" as PYD
+participant "get_current_admin\n(deps.py)" as DEP
+database "SQLite DB" as DB
+
+== Script Save ==
+
+A -> SP : Fill script name + content
+A -> SP : Click "Save Script"
+SP -> PROXY : POST /api/admin/scripts\n{name, content}\nAuthorization: Bearer <admin_token>
+PROXY -> FAST : Forward request
+FAST -> DEP : Verify admin token
+DEP --> FAST : Admin confirmed
+FAST -> PYD : Validate ScriptCreate schema\n{name: required, content: required}
+PYD --> FAST : Valid
+FAST -> DB : INSERT INTO scripts\n{name, content, status="draft", created_by=admin_id}
+DB --> FAST : Script row {id, name, content, status}
+FAST --> PROXY : 201 Created {id, name, content, status, created_at}
+PROXY --> SP : 201 response
+SP -> SP : Add script card to list
+SP --> A : Script visible in Scripts tab
+
+== Persona Save ==
+
+A -> SP : Fill persona name, tone, description
+A -> SP : Click "Save Persona"
+SP -> PROXY : POST /api/admin/personas\n{name, tone, description}\nAuthorization: Bearer <admin_token>
+PROXY -> FAST : Forward request
+FAST -> DEP : Verify admin token
+DEP --> FAST : Admin confirmed
+FAST -> PYD : Validate PersonaCreate schema\n{name: required, tone: required}
+PYD --> FAST : Valid
+FAST -> DB : INSERT INTO personas\n{name, tone, description, is_active=true, created_by=admin_id}
+DB --> FAST : Persona row {id, name, tone}
+FAST --> PROXY : 201 Created {id, name, tone, description, is_active}
+PROXY --> SP : 201 response
+SP -> SP : Add persona card to list
+SP -> SP : Recompute readiness score
+SP --> A : Persona visible in Personas tab\nReadiness score updated
+@enduml

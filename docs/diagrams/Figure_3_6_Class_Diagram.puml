@@ -1,0 +1,98 @@
+@startuml Figure_3_6_Class_Diagram
+!theme plain
+skinparam defaultFontName Arial
+skinparam classBackgroundColor #EAF0FB
+skinparam classBorderColor #3A6BC9
+skinparam classHeaderBackgroundColor #3A6BC9
+skinparam classHeaderFontColor #FFFFFF
+skinparam enumBackgroundColor #FFF9C4
+skinparam enumBorderColor #F9A825
+skinparam ArrowColor #444444
+skinparam noteBorderColor #999999
+
+title EchoAI Class Diagram — Core Entities
+
+enum Role {
+  agent
+  supervisor
+  admin
+}
+
+enum UserStatus {
+  active
+  locked
+  inactive
+}
+
+enum CampaignStatus {
+  draft
+  active
+  paused
+  completed
+}
+
+enum ScriptStatus {
+  draft
+  active
+}
+
+class User {
+  +id: INTEGER  <<PK>>
+  +email: VARCHAR(255)  <<UNIQUE>>
+  +hashed_password: VARCHAR(255)
+  +role: Role
+  +status: UserStatus
+  +full_name: VARCHAR(255)
+  +created_at: DATETIME
+  +updated_at: DATETIME
+  --
+  +get_password_hash()
+  +verify_password()
+}
+
+class Script {
+  +id: INTEGER  <<PK>>
+  +name: VARCHAR(255)
+  +content: TEXT
+  +campaign_id: INTEGER  <<FK>>
+  +status: ScriptStatus
+  +created_by: INTEGER  <<FK>>
+  +created_at: DATETIME
+  +updated_at: DATETIME
+}
+
+class Persona {
+  +id: INTEGER  <<PK>>
+  +name: VARCHAR(255)
+  +tone: VARCHAR(100)
+  +description: TEXT
+  +campaign_id: INTEGER  <<FK>>
+  +is_active: BOOLEAN
+  +created_by: INTEGER  <<FK>>
+  +created_at: DATETIME
+}
+
+class Campaign {
+  +id: INTEGER  <<PK>>
+  +name: VARCHAR(255)  <<UNIQUE>>
+  +product_description: TEXT
+  +target_audience: TEXT
+  +call_goals: TEXT
+  +status: CampaignStatus
+  +script_id: INTEGER  <<FK>>
+  +persona_id: INTEGER  <<FK>>
+  +created_by: INTEGER  <<FK>>
+  +created_at: DATETIME
+  +updated_at: DATETIME
+}
+
+User "1" --> "0..*" Script : creates (created_by)
+User "1" --> "0..*" Persona : creates (created_by)
+User "1" --> "0..*" Campaign : creates (created_by)
+Campaign "0..*" --> "0..1" Script : uses (script_id)
+Campaign "0..*" --> "0..1" Persona : uses (persona_id)
+User --> Role
+User --> UserStatus
+Campaign --> CampaignStatus
+Script --> ScriptStatus
+@enduml

@@ -1,11 +1,11 @@
-# EchoAI Codebase Context (Pre-Implementation)
+# EchoAI Codebase Context (Current Implementation)
 
-Last updated: April 24, 2026
-Scope: Read-only analysis of the current repository state
+Last updated: May 3, 2026
+Scope: Current implementation snapshot for SDS and engineering reference
 
 ## 1. Objective of this Context File
 
-This document is a single pre-implementation context source for developers and AI agents. It summarizes:
+This document is a single, up-to-date context source for developers and AI agents. It summarizes:
 
 1. What this project is and who it serves
 2. How the codebase is organized and how it runs
@@ -13,20 +13,20 @@ This document is a single pre-implementation context source for developers and A
 4. Key modules, data flow, dependencies, and config
 5. Testing, reliability, risks, and recommended next steps
 
-Use this file before starting any implementation task.
+Use this file before starting any implementation or documentation task.
 
 ---
 
 ## 2. Project Identity and Purpose
 
-EchoAI is an AI-powered voice operations platform concept for BPO teams.
+EchoAI is an AI-powered voice operations platform for BPO teams.
 
 Current repository state:
 
-1. Frontend-focused Next.js application
+1. Full-stack: Next.js frontend + FastAPI backend
 2. Role-based interface flows for Agent, Supervisor, and Admin
-3. Prototype behavior with local state and localStorage in several modules
-4. Backend integrations described in docs, but not implemented in this repository yet
+3. Backend authentication and admin user management implemented
+4. Some functional modules still run on local UI state (campaigns, scripts, personas, supervisor/agent live call simulations, leads)
 
 Target user roles:
 
@@ -40,13 +40,15 @@ Target user roles:
 
 ### Root-level important files
 
-1. README.md (currently generic Next.js template, not project-specific)
+1. README.md (partially updated with one-command dev flow)
 2. package.json
 3. tsconfig.json
 4. tailwind.config.ts
 5. middleware.ts
 6. CONTRIBUTING.md
-7. requirment.txt (project notes/backlog style content, not Python package requirements)
+7. dev.mjs (one-command launcher for backend + frontend)
+8. requirment.txt (project notes/backlog style content, not Python package requirements)
+9. next.config.mjs (rewrites /api to backend)
 
 ### Main folders
 
@@ -54,14 +56,21 @@ Target user roles:
 2. src/app: Next.js App Router entry routes
 3. src/components: feature and UI components
 4. src/lib: shared auth/navigation/util logic
+5. echoai-backend: FastAPI app, models, schemas, routes
 
 ### Entry points and boot flow
 
-1. src/app/layout.tsx (global layout)
-2. src/app/page.tsx (landing route)
-3. src/app/login/page.tsx and src/app/signup/page.tsx
-4. Protected routes under dashboard, supervisor, and admin
-5. middleware.ts enforces protected route access checks
+1. dev.mjs seeds test users, starts backend (uvicorn) + frontend (next dev)
+2. src/app/layout.tsx (global layout)
+3. src/app/page.tsx (landing route)
+4. src/app/login/page.tsx and src/app/signup/page.tsx
+5. Protected routes under dashboard, supervisor, and admin
+6. middleware.ts enforces protected route access checks (token + role)
+
+Common dev ports:
+
+1. Frontend: http://localhost:3000 (or 3001 if 3000 is busy)
+2. Backend: http://127.0.0.1:8000
 
 ---
 
@@ -77,10 +86,10 @@ Reviewed documentation:
 
 Key alignment observations:
 
-1. docs/ProjectRD.md accurately reflects current frontend-first prototype status
-2. docs/EchoAI_Frontend_Workflow.md describes broader full-product behavior (voice pipeline, escalation, analytics depth)
-3. Current code implements UI-level flows and simulation for many of those concepts, but not backend-connected operations
-4. README.md is outdated and inconsistent with real project purpose
+1. docs/ProjectRD.md reflects product vision and UX
+2. docs/EchoAI_Frontend_Workflow.md describes full-product behavior (voice pipeline, escalation, analytics depth)
+3. Current code implements UI-level flows and simulations; backend now exists for auth and admin user management
+4. README.md is partially updated but still mixed with template content
 
 Binary docs present but not parsed in this pass:
 
@@ -94,10 +103,20 @@ Binary docs present but not parsed in this pass:
 
 ### Architecture style
 
-1. Frontend monolith using Next.js App Router
+1. Full-stack: Next.js App Router frontend + FastAPI backend
 2. Componentized feature modules by domain (admin, auth, dashboard, landing, ui)
-3. Route wrappers are mostly thin and delegate UI/business logic to components
-4. Role-based access control enforced by middleware and auth helpers
+3. Route wrappers are thin and delegate UI/business logic to components
+4. Role-based access control enforced by middleware and backend auth
+5. Next.js rewrites /api/* to the FastAPI backend
+
+### Backend structure (FastAPI)
+
+1. echoai-backend/app/main.py: FastAPI app setup, CORS, router wiring, SQLite migration for user status
+2. echoai-backend/app/api/routes: auth, users, scripts, personas, campaigns
+3. echoai-backend/app/models: SQLAlchemy models
+4. echoai-backend/app/schemas: Pydantic schemas
+5. echoai-backend/app/core/security.py: password hashing and JWT creation
+6. echoai-backend/app/api/deps.py: auth guards (Bearer token, admin role)
 
 ### Text diagram
 
@@ -107,6 +126,7 @@ Client Browser
 -> Shared logic helpers (src/lib)
 -> Session persistence (localStorage + cookie)
 -> Middleware RBAC guard
+-> Next.js /api proxy -> FastAPI backend
 -> Render allowed page or redirect to login/unauthorized
 
 ### Protection boundaries
@@ -135,21 +155,42 @@ Primary files:
 2. src/components/auth/LoginForm.tsx
 3. src/components/auth/SignupForm.tsx
 4. middleware.ts
+5. echoai-backend/app/api/routes/auth.py
+6. echoai-backend/app/api/deps.py
 
 Responsibilities:
 
 1. Role model and route access mapping
 2. Token decode/expiry checks
 3. Session persistence and clear helpers
-4. Login/signup request helpers with API fallback behavior
+4. Login/signup request helpers (login requires backend; signup has limited fallback when backend is unreachable)
+5. Backend token creation, hashing, and role claims
 
 Important behavior:
 
-1. loginWithPassword attempts /api/auth/login
-2. signupWithPassword attempts /api/auth/signup
-3. If endpoint is unavailable, helper returns demo-mode behavior
+1. loginWithPassword calls /api/auth/login and expects access_token; no demo fallback
+2. signupWithPassword calls /api/auth/signup (admin-only on backend)
+3. signupWithPassword returns success only when the endpoint is unavailable (404/405 or backend not reachable); backend errors surface to the UI
+4. Login blocked if user status is not active
 
-### 6.2 Routing Layer
+### 6.2 Backend user management (Admin)
+
+Primary files:
+
+1. echoai-backend/app/api/routes/users.py
+2. echoai-backend/app/schemas/user.py
+3. echoai-backend/app/models/user.py
+4. src/components/admin/UserManagementPage.tsx
+
+Behavior:
+
+1. Admin UI loads users from /api/admin/users
+2. Create user posts to /api/admin/users
+3. Lock/Unlock/Deactivate uses /api/admin/users/{id}
+4. Reset password uses /api/admin/users/{id}/reset-password (returns temporary password)
+5. Login is blocked for users with status != active
+
+### 6.3 Routing Layer
 
 Files under src/app are mostly route wrappers that render corresponding components from src/components.
 
@@ -158,7 +199,7 @@ Examples:
 1. src/app/admin/users/page.tsx -> UserManagementPage
 2. src/app/admin/setup/page.tsx -> ScriptPersonaSetup
 
-### 6.3 Admin Suite
+### 6.4 Admin Suite
 
 Main admin components:
 
@@ -177,10 +218,10 @@ Main admin components:
 Current behavior pattern:
 
 1. Rich interactive UI state
-2. Mock/demo datasets inside components
-3. localStorage use for selected flows where cross-screen persistence is needed
+2. User Management is backed by real backend APIs
+3. Script/persona setup, campaign setup, knowledge base, and analytics modules still use mock/demo datasets and local state
 
-### 6.4 Agent and Supervisor Experience
+### 6.5 Agent and Supervisor Experience
 
 Main files:
 
@@ -190,11 +231,11 @@ Main files:
 
 Behavior:
 
-1. Agent dashboard is UI-rich and simulation-oriented
-2. Supervisor route uses protected landing composition
-3. Cross-role navigation links exist, while middleware enforces final access control
+1. Agent dashboard is UI-rich and simulation-oriented (localStorage-backed via agent-state)
+2. Supervisor route uses live-call simulation state (localStorage-backed via supervisor-state)
+3. Cross-role navigation links exist, middleware enforces access control
 
-### 6.5 Design System and UI Atoms
+### 6.6 Design System and UI Atoms
 
 Files:
 
@@ -216,13 +257,21 @@ Pattern:
 ### 7.1 Authentication flow
 
 1. User submits login form
-2. Client helper attempts API auth
-3. On API absence/failure class, fallback returns demo token/user
+2. Client calls /api/auth/login (proxied to backend)
+3. Backend validates credentials and status, returns JWT access_token + user
 4. Session stored in localStorage and cookie
 5. Redirect to role default route or allowed next route
 6. Middleware validates token existence/expiry/role for protected paths
 
-### 7.2 Campaign setup flow
+### 7.2 Admin user lifecycle flow
+
+1. Admin creates a user in Admin -> User Access
+2. Frontend calls /api/admin/users to persist to backend
+3. Backend stores hashed password and status
+4. Newly created users can log in immediately
+5. Admin can lock/unlock or deactivate, blocking login for non-active status
+
+### 7.3 Campaign setup flow
 
 1. Campaign draft created in CampaignsPage
 2. Draft written to localStorage key echoai_campaign_draft
@@ -230,20 +279,52 @@ Pattern:
 4. Readiness computed from script + persona + context completion
 5. Activation status updated locally
 
-### 7.3 Knowledge base flow
+### 7.4 Knowledge base flow
 
 1. Knowledge items initialized from default in-component data or localStorage
 2. CRUD/filter/status updates happen in component state
 3. State persisted to localStorage key echoai_knowledge_items
 
-### 7.4 Local storage keys currently in use
+### 7.5 Local storage keys currently in use
 
 1. echoai_token
 2. echoai_user
 3. echoai_campaign_draft
 4. echoai_knowledge_items
+5. echoai_agent_campaigns
+6. echoai_agent_call_history
+7. echoai_agent_leads
+8. echoai_agent_scripts
+9. echoai_supervisor_team_activity
+10. echoai_supervisor_live_calls
+11. echoai_supervisor_escalations
+12. echoai_supervisor_performance
+13. echoai_supervisor_campaign_monitor
+14. echoai_supervisor_alerts
+15. echoai_supervisor_settings
 
-No database interactions are implemented in this repository.
+Backend persistence exists for auth, users, scripts, personas, and campaigns; only user management is currently wired to the frontend UI.
+
+### 7.6 Backend API surface (current)
+
+Auth:
+
+1. POST /api/auth/login
+2. POST /api/auth/signup (admin-only)
+3. GET /api/health
+
+Admin user management:
+
+1. GET /api/admin/users
+2. POST /api/admin/users
+3. PUT /api/admin/users/{user_id}
+4. POST /api/admin/users/{user_id}/reset-password
+
+Admin content management:
+
+1. /api/admin/scripts (CRUD)
+2. /api/admin/personas (CRUD)
+3. /api/admin/campaigns (CRUD + activate/pause)
 
 ---
 
@@ -269,8 +350,9 @@ Dev/tooling:
 
 Notes:
 
-1. This is a frontend stack only in current repo state
-2. No backend framework runtime is present in repository dependencies
+1. Frontend: Next.js 14 with Tailwind and TypeScript
+2. Backend: FastAPI + SQLAlchemy + SQLite (requirements.txt in echoai-backend)
+3. Dev launcher: dev.mjs (seeds users + starts both servers)
 
 ---
 
@@ -281,13 +363,21 @@ Configuration files:
 1. tsconfig.json (strict true, alias path mapping)
 2. tailwind.config.ts (extended theme and design tokens)
 3. postcss.config.mjs
-4. next.config.mjs
+4. next.config.mjs (rewrites /api to backend)
 5. middleware.ts (route guard)
 6. .eslintrc.json
+7. echoai-backend/app/core/config.py (backend env configuration)
+
+Backend environment defaults:
+
+1. DATABASE_URL=sqlite:///./echoai.db
+2. SECRET_KEY=change-this-in-production
+3. ACCESS_TOKEN_EXPIRE_MINUTES=480
+4. CORS_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3002
 
 Environment/deployment findings:
 
-1. No .env files found in repository scan
+1. No .env files committed
 2. No Dockerfile or docker-compose files found
 3. No CI workflow files found under .github/workflows
 
@@ -320,11 +410,11 @@ Implication:
 
 ## 12. Weaknesses and Technical Debt
 
-1. README is not aligned with project reality
+1. README still includes template sections
 2. No test suite or CI
-3. Significant logic currently simulated in frontend state instead of backend-backed workflows
+3. Many workflows still simulated in frontend state
 4. Some duplicated scaffolding despite available shared shells
-5. Prototype auth/session strategy not production-ready
+5. User admin flows now real, but other admin modules remain mock
 
 ---
 
@@ -332,14 +422,14 @@ Implication:
 
 ### Security and auth risk
 
-1. Token handling is prototype-level; flow is suitable for demo but not production hardening
-2. API fallback can hide backend outages by silently moving to demo behavior
+1. Token handling is suitable for dev but still not production hardening
+2. Admin signup is now protected; other endpoints should remain protected
 
 ### Product/implementation gap risk
 
 1. Docs describe real-time voice and analytics ecosystem
 2. Current repository mostly models this at UI/prototype layer
-3. Backend contracts/entities/endpoints are not yet present here
+3. Backend contracts exist for auth/users/scripts/personas/campaigns (admin-only)
 
 ### Delivery risk
 
@@ -351,7 +441,7 @@ Implication:
 ## 14. Suggested Next Steps Before Major Implementation
 
 1. Replace README.md with repository-accurate architecture, setup, and status
-2. Define backend API contracts for auth, campaigns, users, knowledge, leads, analytics, reports, and security events
+2. Document backend API contracts for campaigns, users, knowledge, leads, analytics, reports, and security events
 3. Add baseline tests:
    - auth helper unit tests
    - critical component behavior tests
@@ -377,7 +467,7 @@ Implication:
 
 ## 16. Scope Notes and Assumptions
 
-1. This context reflects the repository state as analyzed on April 24, 2026
+1. This context reflects the repository state as analyzed on May 3, 2026
 2. Binary docs were detected but not parsed in this pass
 3. Findings are based on code and markdown available in the workspace
 

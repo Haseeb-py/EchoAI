@@ -22,47 +22,27 @@ Use these credentials to login to the EchoAI system. The backend will validate t
 
 ## Setup Instructions (One Time)
 
-### 1. Start Backend Server
+### 1. Start Everything From One Terminal
 
-Open Terminal 1:
-\\\ash
-cd echoai-backend
-python -m venv venv
-.\venv\Scripts\activate  # Windows
-source venv/bin/activate  # Linux/Mac
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-\\\
-
-Backend runs on: **http://localhost:8000**
-
-### 2. Seed Test Users to Database
-
-Open Terminal 2 (while backend is running):
-\\\ash
-cd echoai-backend
-.\venv\Scripts\activate
-python seed_test_users.py
-\\\
-
-Expected output:
-\\\
-Created user: admin@echoai.com (admin)
-Created user: supervisor@echoai.com (supervisor)
-Created user: agent@echoai.com (agent)
-Test users seeded successfully!
-\\\
-
-**Note**: If users already exist, they will be skipped.
-
-### 3. Start Frontend Server
-
-Open Terminal 3:
-\\\ash
+Run this from the project root:
+\`\`\`bash
 npm run dev
-\\\
+\`\`\`
 
-Frontend runs on: **http://localhost:3000**
+This single command does three things:
+
+1. Seeds the test users into the backend database
+2. Starts the FastAPI backend on **http://localhost:8000**
+3. Starts the Next.js frontend on **http://localhost:3000**
+
+**Note**: If users already exist, seeding will skip them.
+
+### 2. Optional: Frontend Only
+
+If you only want the UI and already have the backend running, use:
+\`\`\`bash
+npm run dev:frontend
+\`\`\`
 
 ---
 

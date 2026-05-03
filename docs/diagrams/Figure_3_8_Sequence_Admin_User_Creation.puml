@@ -1,0 +1,71 @@
+@startuml Figure_3_8_Sequence_Admin_User_Creation
+!theme plain
+skinparam defaultFontName Arial
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #3A6BC9
+skinparam sequenceParticipantBackgroundColor #EAF0FB
+skinparam sequenceLifeLineBorderColor #999999
+skinparam databaseBackgroundColor #FFF3E0
+skinparam databaseBorderColor #FB8C00
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #F9A825
+
+title Sequence Diagram: Admin User Creation
+
+actor "Administrator" as A
+participant "UserManagement\nPage\n(React)" as PAGE
+participant "src/lib/auth.ts\nsignupWithPassword()" as AUTH
+participant "Next.js\nAPI Proxy" as PROXY
+participant "FastAPI\n/api/admin/users" as FAST
+participant "get_current_admin\n(deps.py)" as DEP
+participant "PassLib\n(bcrypt)" as PASS
+database "SQLite DB" as DB
+
+A -> PAGE : Click "Create User" button
+PAGE -> PAGE : Open Create User modal
+A -> PAGE : Fill form (email, password, role, full_name)
+A -> PAGE : Submit form
+
+PAGE -> AUTH : signupWithPassword({email, password, role, full_name})
+AUTH -> PROXY : POST /api/admin/users\nAuthorization: Bearer <admin_token>
+PROXY -> FAST : Forward request
+
+FAST -> DEP : get_current_admin(token)
+DEP -> DEP : Verify JWT signature (PyJWT)
+DEP -> DEP : Decode claims: role == "admin"?
+
+alt role != admin
+  DEP --> FAST : Raise HTTP 403 Forbidden
+  FAST --> PROXY : 403 {detail: "Not enough permissions"}
+  PROXY --> AUTH : 403
+  AUTH --> PAGE : Error
+  PAGE --> A : Show permission error
+else Admin confirmed
+  DEP --> FAST : current_user (admin)
+  FAST -> PASS : get_password_hash(password)
+  PASS --> FAST : bcrypt hash
+
+  FAST -> DB : INSERT INTO users\n{email, hashed_password, role, full_name, status="active"}
+  
+  alt Email already exists
+    DB --> FAST : IntegrityError (UNIQUE constraint)
+    FAST --> PROXY : 409 {detail: "Email already registered"}
+    PROXY --> AUTH : 409
+    AUTH --> PAGE : Conflict error
+    PAGE --> A : Show "Email address already in use"
+  else Insert success
+    DB --> FAST : New user row with id
+    FAST --> PROXY : 201 Created {user: {id, email, role, status}}
+    PROXY --> AUTH : 201
+    AUTH --> PAGE : Success response
+    PAGE -> PAGE : Close modal
+    PAGE -> PROXY : GET /api/admin/users (refresh table)
+    PROXY -> FAST : GET /api/admin/users
+    FAST -> DB : SELECT * FROM users
+    DB --> FAST : All user records
+    FAST --> PROXY : 200 [{...users}]
+    PROXY --> PAGE : Updated user list
+    PAGE --> A : New user visible in table with "Active" badge
+  end
+end
+@enduml

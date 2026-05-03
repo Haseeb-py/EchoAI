@@ -23,10 +23,12 @@ export default function LoginForm({
   initialEmail = "",
   initialRegistered = false,
   nextPath = "",
+  fresh = false,
 }: {
   initialEmail?: string;
   initialRegistered?: boolean;
   nextPath?: string;
+  fresh?: boolean;
 }) {
   const router = useRouter();
   const [role, setRole] = useState<UserRole>("agent");
@@ -36,6 +38,11 @@ export default function LoginForm({
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (fresh) {
+      clearAuthSession();
+      return;
+    }
+
     const token = getStoredAuthToken();
 
     if (!token || isTokenExpired(token)) {
@@ -57,7 +64,7 @@ export default function LoginForm({
 
       router.replace(destination);
     }
-  }, [nextPath, router]);
+  }, [fresh, nextPath, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -127,25 +134,6 @@ export default function LoginForm({
                   Account created. Sign in to continue into EchoAI.
                 </div>
               ) : null}
-
-              <div className="text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-white/28">
-                Session Protocols
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-[12px] font-medium text-white/62 transition-colors hover:text-white/82"
-                >
-                  Vault
-                </button>
-                <button
-                  type="button"
-                  className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-[12px] font-medium text-white/62 transition-colors hover:text-white/82"
-                >
-                  Biometrics
-                </button>
-              </div>
             </div>
           }
         >

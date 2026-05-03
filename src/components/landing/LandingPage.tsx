@@ -3,7 +3,6 @@ import { landingNavLinks } from "@/lib/navigation";
 import {
   ArrowRight,
   AudioWaveform,
-  Bell,
   Bot,
   Check,
   Clock3,
@@ -14,7 +13,6 @@ import {
   PhoneIncoming,
   Play,
   ShieldCheck,
-  UserCircle2,
   Zap,
 } from "lucide-react";
 
@@ -43,18 +41,6 @@ export default function LandingPage() {
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2">
-            <span className="mr-2 text-[9px] font-semibold tracking-[0.16em] text-white/70">STATUS</span>
-            <button type="button" className="grid h-8 w-8 place-items-center rounded-[8px] border border-white/10 bg-white/[0.02] text-white/75">
-              <Bell size={14} strokeWidth={2.1} aria-hidden="true" />
-            </button>
-            <button type="button" className="grid h-8 w-8 place-items-center rounded-[8px] border border-white/10 bg-white/[0.02] text-white/75">
-              <AudioWaveform size={14} strokeWidth={2.1} aria-hidden="true" />
-            </button>
-            <button type="button" className="grid h-8 w-8 place-items-center rounded-full border border-[#8fdde0]/45 bg-[#7ad3d8]/26 text-[#d8fbfd]">
-              <UserCircle2 size={14} strokeWidth={2} aria-hidden="true" />
-            </button>
-          </div>
         </header>
         <section className="mx-auto grid w-full max-w-[1280px] grid-cols-1 gap-10 px-8 pb-14 pt-14 lg:grid-cols-[1.08fr_0.92fr] lg:items-stretch lg:pb-20 lg:pt-16">
           <div>
@@ -83,7 +69,7 @@ export default function LandingPage() {
               </Link>
 
               <Link
-                href="/login"
+                href="/login?fresh=1"
                 className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-white/14 bg-white/[0.02] px-4 text-[11px] font-semibold tracking-[0.06em] text-white/88"
               >
                 <Play size={13} strokeWidth={2.2} aria-hidden="true" />
@@ -137,12 +123,6 @@ export default function LandingPage() {
                 We did not just build a chatbot. We built a digital sovereign capable of handling the entire customer lifecycle.
               </p>
             </div>
-            <button
-              type="button"
-              className="text-[10px] font-semibold tracking-[0.14em] text-[#aeb2ff] underline decoration-[#8e96ff]/60 underline-offset-[4px] hover:text-[#c2c6ff]"
-            >
-              VIEW CAPABILITIES
-            </button>
           </div>
 
           <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -181,9 +161,6 @@ export default function LandingPage() {
               <p className="mt-3 max-w-[510px] text-[12px] leading-5 text-white/55">
                 Upload your entire product catalog and CRM history. The AI becomes a subject matter expert in seconds.
               </p>
-              <Link href="/signup" className="mt-6 inline-flex h-8 items-center rounded-[7px] border border-white/12 bg-white/[0.02] px-3 text-[10px] font-semibold tracking-[0.12em] text-white/86">
-                EXPLORE INTEGRATION
-              </Link>
             </article>
           </div>
         </div>
@@ -287,21 +264,6 @@ export default function LandingPage() {
               Join the elite BPOs already seeing 300% ROI. Deploy your first AI voice agent in under 48 hours.
             </p>
 
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Link
-                href="/signup"
-                className="inline-flex h-10 items-center rounded-[9px] bg-[#b4b3ff] px-5 text-[11px] font-semibold tracking-[0.08em] text-[#1a2344] shadow-[0_0_28px_rgba(180,179,255,0.42)]"
-              >
-                Book an Executive Demo
-              </Link>
-              <Link
-                href="/login"
-                className="inline-flex h-10 items-center rounded-[9px] border border-white/12 bg-white/[0.02] px-5 text-[11px] font-semibold tracking-[0.08em] text-white/88"
-              >
-                View Access
-              </Link>
-            </div>
-
             <p className="mt-8 text-[8px] font-semibold tracking-[0.18em] text-white/38">NO CREDIT CARD REQUIRED. SCALABLE PRICING MODELS.</p>
           </div>
         </div>
@@ -320,10 +282,6 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <FooterCol title="PLATFORM" links={["Intelligence Engine", "Voice Lab", "Integrations", "Security"]} />
-          <FooterCol title="COMPANY" links={["About Us", "Customers", "Careers", "Blog"]} />
-          <FooterCol title="LEGAL" links={["Privacy", "Terms", "Cookie Policy"]} />
-
           <div className="col-span-2 flex items-end justify-end lg:col-span-1">
             <span className="inline-flex items-center gap-1 rounded-full border border-white/12 bg-white/[0.02] px-3 py-1 text-[8px] font-semibold tracking-[0.12em] text-white/65">
               <span className="h-1.5 w-1.5 rounded-full bg-white/60" />
@@ -336,23 +294,6 @@ export default function LandingPage() {
           <span>© 2026 ECHOAI TECHNOLOGIES INC. ALL RIGHTS RESERVED.</span>
         </div>
       </footer>
-    </div>
-  );
-}
-
-function FooterCol({ title, links }: { title: string; links: string[] }) {
-  return (
-    <div>
-      <h3 className="text-[9px] font-semibold tracking-[0.16em] text-white/48">{title}</h3>
-      <ul className="mt-4 space-y-2.5 text-[12px] text-white/65">
-        {links.map((link) => (
-          <li key={link}>
-            <button type="button" className="font-body hover:text-white">
-              {link}
-            </button>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

@@ -1,0 +1,65 @@
+@startuml Figure_3_11_State_Campaign_Lifecycle
+!theme plain
+skinparam defaultFontName Arial
+skinparam stateBackgroundColor #EAF0FB
+skinparam stateBorderColor #3A6BC9
+skinparam stateArrowColor #444444
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #F9A825
+
+title State Transition Diagram: Campaign Lifecycle
+
+[*] --> Draft : Admin creates campaign\nPOST /api/admin/campaigns
+
+state Draft
+Draft : Script and Persona being configured
+Draft : Readiness score < 100%
+Draft : Activate button disabled
+Draft : Campaign context in localStorage
+
+Draft --> Draft : Admin edits script,\npersona, context fields\n(PUT /api/admin/scripts, personas)
+
+Draft --> Active : Readiness == 100%,\nAdmin clicks Activate\nPOST .../campaigns/{id}/activate
+
+state Active
+Active : Available for agent call operations
+Active : Script/Persona locked in
+Active : Live metrics displayed (future)
+Active : Agents see campaign in dashboard
+
+Active --> Paused : Admin clicks Pause\nPOST .../campaigns/{id}/pause
+
+state Paused
+Paused : Operations suspended
+Paused : Configuration preserved
+Paused : Agents cannot use campaign
+
+Paused --> Active : Admin clicks Resume\nPOST .../campaigns/{id}/activate
+
+Active --> Completed : Target call volume reached\nor campaign end date passed
+
+state Completed
+Completed : No longer accepting calls
+Completed : Historical data preserved
+Completed : Read-only state
+
+Completed --> Archived : System auto-archives\n(future sprint)
+
+state Archived
+Archived : Cannot be modified directly
+Archived : Available for reporting only
+
+Archived --> [*]
+
+note left of Draft
+  echoai_campaign_draft
+  written to localStorage
+  during setup phase
+end note
+
+note right of Active
+  Campaign data available
+  to agents via
+  /api/admin/campaigns
+end note
+@enduml

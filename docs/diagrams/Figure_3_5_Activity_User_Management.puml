@@ -1,0 +1,61 @@
+@startuml Figure_3_5_Activity_User_Management
+!theme plain
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #EAF0FB
+skinparam ActivityBorderColor #3A6BC9
+skinparam ActivityDiamondBackgroundColor #FFF9C4
+skinparam ActivityDiamondBorderColor #F9A825
+skinparam ArrowColor #444444
+skinparam swimlaneBorderColor #999999
+
+title Activity Diagram: Admin User Management (Create, Lock, Reset)
+
+|Admin|
+start
+:Navigate to User Access page (/admin);
+:GET /api/admin/users;
+:User table loads with all accounts;
+
+:Admin selects an action;
+
+|Create User|
+fork
+  :Click "Create User";
+  :Modal opens with form\n(email, password, role, full_name);
+  :Fill form and submit;
+  :POST /api/admin/users\n(Authorization: Bearer admin_token);
+  :Backend hashes password (bcrypt);
+  :INSERT user row (status=active);
+  :201 Created returned;
+  :Table refreshes — new user visible;
+
+|Lock / Unlock User|
+fork again
+  :Click "Lock" on active user;
+  :PUT /api/admin/users/{id}\n{status: "locked"};
+  :Status badge updates to "Locked";
+  :User cannot authenticate;
+  :Admin clicks "Unlock" later;
+  :PUT /api/admin/users/{id}\n{status: "active"};
+  :Status badge updates to "Active";
+
+|Deactivate User|
+fork again
+  :Click "Deactivate" on active user;
+  :PUT /api/admin/users/{id}\n{status: "inactive"};
+  :Status badge updates to "Inactive";
+  :User cannot authenticate;
+
+|Reset Password|
+fork again
+  :Click "Reset Password" on user row;
+  :POST /api/admin/users/{id}/reset-password;
+  :Temporary password generated;
+  :Temp password returned to admin\nin confirmation modal;
+
+|Admin|
+end fork
+
+:UI table reflects new user state immediately;
+stop
+@enduml

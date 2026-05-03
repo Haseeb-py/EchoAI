@@ -11,9 +11,3 @@ from sqlalchemy.orm import DeclarativeBase
 
 class Base(DeclarativeBase):
     pass
-
-
-from app.models.user import User  # noqa: E402, F401
-from app.models.script import Script  # noqa: E402, F401
-from app.models.persona import Persona  # noqa: E402, F401
-from app.models.campaign import Campaign  # noqa: E402, F401

@@ -1,0 +1,72 @@
+@startuml Figure_3_12_ERD
+!theme plain
+skinparam defaultFontName Arial
+skinparam EntityBackgroundColor #EAF0FB
+skinparam EntityBorderColor #3A6BC9
+skinparam ArrowColor #444444
+
+title Entity Relationship Diagram — EchoAI Current Backend Schema
+
+entity "**User**" as USER {
+  *id : INTEGER <<PK, AUTO_INCREMENT>>
+  --
+  email : VARCHAR(255) <<UNIQUE, NOT NULL>>
+  hashed_password : VARCHAR(255) <<NOT NULL>>
+  role : VARCHAR(50) <<NOT NULL, DEFAULT 'agent'>>
+  status : VARCHAR(50) <<NOT NULL, DEFAULT 'active'>>
+  full_name : VARCHAR(255) <<NULLABLE>>
+  created_at : DATETIME <<NOT NULL>>
+  updated_at : DATETIME <<NOT NULL>>
+}
+
+entity "**Script**" as SCRIPT {
+  *id : INTEGER <<PK, AUTO_INCREMENT>>
+  --
+  name : VARCHAR(255) <<NOT NULL>>
+  content : TEXT <<NOT NULL>>
+  campaign_id : INTEGER <<FK → Campaign.id, NULLABLE>>
+  status : VARCHAR(50) <<DEFAULT 'draft'>>
+  created_by : INTEGER <<FK → User.id, NOT NULL>>
+  created_at : DATETIME <<NOT NULL>>
+  updated_at : DATETIME <<NOT NULL>>
+}
+
+entity "**Persona**" as PERSONA {
+  *id : INTEGER <<PK, AUTO_INCREMENT>>
+  --
+  name : VARCHAR(255) <<NOT NULL>>
+  tone : VARCHAR(100) <<NOT NULL>>
+  description : TEXT <<NULLABLE>>
+  campaign_id : INTEGER <<FK → Campaign.id, NULLABLE>>
+  is_active : BOOLEAN <<NOT NULL, DEFAULT TRUE>>
+  created_by : INTEGER <<FK → User.id, NOT NULL>>
+  created_at : DATETIME <<NOT NULL>>
+}
+
+entity "**Campaign**" as CAMPAIGN {
+  *id : INTEGER <<PK, AUTO_INCREMENT>>
+  --
+  name : VARCHAR(255) <<NOT NULL, UNIQUE>>
+  product_description : TEXT <<NULLABLE>>
+  target_audience : TEXT <<NULLABLE>>
+  call_goals : TEXT <<NULLABLE>>
+  status : VARCHAR(50) <<DEFAULT 'draft'>>
+  script_id : INTEGER <<FK → Script.id, NULLABLE>>
+  persona_id : INTEGER <<FK → Persona.id, NULLABLE>>
+  created_by : INTEGER <<FK → User.id, NOT NULL>>
+  created_at : DATETIME <<NOT NULL>>
+  updated_at : DATETIME <<NOT NULL>>
+}
+
+USER ||--o{ SCRIPT : "creates (created_by)"
+USER ||--o{ PERSONA : "creates (created_by)"
+USER ||--o{ CAMPAIGN : "creates (created_by)"
+CAMPAIGN }o--o| SCRIPT : "uses (script_id)"
+CAMPAIGN }o--o| PERSONA : "uses (persona_id)"
+
+note bottom of CAMPAIGN
+  Future entities to be added:
+  Lead, CallRecord, AnalyticsEvent,
+  KnowledgeItem, EscalationAlert
+end note
+@enduml

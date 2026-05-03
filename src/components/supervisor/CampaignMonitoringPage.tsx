@@ -110,7 +110,7 @@ export default function CampaignMonitoringPage() {
   return (
     <SupervisorScreenShell
       activeKey="campaigns"
-      contextLabel="Campaign Monitoring"
+      contextLabel=""
       eyebrow="Supervisor / Campaign Health"
       title="Campaign Monitoring"
       description="Track campaign risk, health, and live load while creating linked escalations from campaign-level signals."

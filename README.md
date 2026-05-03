@@ -2,17 +2,15 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+First, run the full development stack from one terminal:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
+
+That single command seeds the test users, starts the FastAPI backend on [http://localhost:8000](http://localhost:8000), and starts the Next.js frontend on [http://localhost:3000](http://localhost:3000).
+
+If you only want the frontend, run `npm run dev:frontend`.
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 

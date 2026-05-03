@@ -1,0 +1,51 @@
+@startuml Figure_3_4_Activity_Campaign_Setup
+!theme plain
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #EAF0FB
+skinparam ActivityBorderColor #3A6BC9
+skinparam ActivityDiamondBackgroundColor #FFF9C4
+skinparam ActivityDiamondBorderColor #F9A825
+skinparam ArrowColor #444444
+
+title Activity Diagram: Admin Campaign and Script Setup Flow
+
+start
+:Admin navigates to Campaigns page (/admin);
+:Admin enters campaign details\n(name, description, product info, target audience);
+:Click "Save Draft";
+:Draft written to localStorage\n(key: echoai_campaign_draft);
+:Campaign card appears with "Draft" badge;
+
+:Admin navigates to Script and Persona Setup page;
+:System reads echoai_campaign_draft\nand pre-populates context fields;
+
+fork
+  :Scripts Tab;
+  :Create or upload calling script;
+  :POST /api/admin/scripts\n{name, content};
+  :Script saved to SQLite;
+fork again
+  :Personas Tab;
+  :Define voice persona\n(professional, empathetic, assertive, or friendly);
+  :POST /api/admin/personas\n{name, tone, description};
+  :Persona saved to SQLite;
+fork again
+  :Campaign Context Tab;
+  :Fill product description,\ntarget audience, call goals;
+end fork
+
+:System computes readiness score\n(script + persona + context completeness);
+
+while (Readiness score == 100%?) is (No)
+  :Activate button remains disabled;
+  :Admin fills remaining required fields;
+  :System computes readiness score\n(script + persona + context completeness);
+endwhile (Yes)
+
+:Activate button becomes enabled;
+:Admin clicks "Activate Campaign";
+:POST /api/admin/campaigns/{id}/activate;
+:Campaign status: draft → active;
+:Campaign available for agent use;
+stop
+@enduml

@@ -70,10 +70,11 @@ export function AgentDashboardPage() {
   return (
     <AgentScreenShell
       activeKey="dashboard"
-      contextLabel="Agent Overview"
+      contextLabel=""
       eyebrow="Agent / Home"
       title="Agent Dashboard"
       description="Launch campaigns, watch live AI calls, review outcomes, and move leads forward from one place."
+      showContextLabel={false}
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Active Calls" value={String(activeCount)} accent="text-[#b9b7ff]" icon={<PhoneCall size={17} strokeWidth={2.1} aria-hidden="true" />} />
@@ -385,10 +386,11 @@ export function AgentLiveCallsPage() {
   return (
     <AgentScreenShell
       activeKey="live"
-      contextLabel="Live Monitoring"
+      contextLabel=""
       eyebrow="Agent / Live"
       title="Live Call Monitor"
       description="Monitor running AI calls, jump into the shared cockpit, or complete calls to move them into history."
+      showContextLabel={false}
     >
       <p className="rounded-[12px] border border-white/[0.06] bg-white/[0.025] px-4 py-3 text-[12px] leading-5 text-white/60" aria-live="polite">
         {message}

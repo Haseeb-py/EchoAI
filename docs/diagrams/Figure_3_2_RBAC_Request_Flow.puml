@@ -1,0 +1,52 @@
+@startuml Figure_3_2_RBAC_Request_Flow
+!theme plain
+skinparam defaultFontName Arial
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceLifeLineBorderColor #999999
+skinparam sequenceBoxBorderColor #888888
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #F9A825
+
+title RBAC Request Flow: Frontend Middleware → Backend Auth Guard
+
+actor "User Browser" as U
+participant "Next.js\nMiddleware\n(middleware.ts)" as MW
+participant "Next.js\nPage / Component" as PAGE
+participant "FastAPI\nRoute Handler" as ROUTE
+participant "get_current_user\n/ get_current_admin\n(deps.py)" as DEPS
+database "SQLite DB" as DB
+
+U -> MW : HTTP Request to /dashboard, /supervisor, or /admin
+MW -> MW : Read echoai_token from cookie
+
+alt No cookie found
+  MW --> U : 302 Redirect → /login
+else Cookie present
+  MW -> MW : Decode JWT (no signature check)
+  alt Token expired (exp < now)
+    MW --> U : 302 Redirect → /login
+  else Token valid
+    MW -> MW : Extract role claim
+    alt role mismatches route prefix
+      MW --> U : 302 Redirect → /login
+    else role matches
+      MW -> PAGE : Forward request (render page)
+      PAGE -> ROUTE : API call + Authorization: Bearer <token>
+      ROUTE -> DEPS : Inject dependency
+      DEPS -> DEPS : Verify JWT signature (PyJWT)
+      DEPS -> DEPS : Check token expiry
+      DEPS -> DB : Fetch user by id from sub claim
+      DB --> DEPS : User record
+      alt role != admin (for admin endpoints)
+        DEPS --> ROUTE : Raise HTTP 403 Forbidden
+        ROUTE --> PAGE : 403 Error response
+      else Authorized
+        DEPS --> ROUTE : Current user resolved
+        ROUTE --> PAGE : 200 OK + data
+        PAGE --> U : Render page with data
+      end
+    end
+  end
+end
+@enduml

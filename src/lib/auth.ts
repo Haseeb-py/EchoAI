@@ -28,6 +28,12 @@ export interface AuthSuccessResponse {
   user: AuthUser;
 }
 
+interface BackendAuthResponse {
+  token?: string;
+  access_token?: string;
+  user: AuthUser;
+}
+
 export interface SignupSuccessResponse {
   success: boolean;
   message: string;
@@ -207,8 +213,8 @@ function buildDemoToken(user: AuthUser) {
 
 async function parseError(response: Response) {
   try {
-    const body = (await response.json()) as { message?: string; error?: string };
-    return body.message || body.error || "Authentication request failed.";
+    const body = (await response.json()) as { message?: string; error?: string; detail?: string };
+    return body.message || body.error || body.detail || "Authentication request failed.";
   } catch {
     return "Authentication request failed.";
   }
@@ -250,10 +256,16 @@ export async function loginWithPassword(
   payload: LoginPayload,
   selectedRole: UserRole = "agent"
 ): Promise<AuthSuccessResponse> {
-  const apiResponse = await safePost<AuthSuccessResponse>("/api/auth/login", payload);
+  const apiResponse = await safePost<BackendAuthResponse>("/api/auth/login", payload);
 
   if (apiResponse) {
-    return apiResponse;
+    const token = apiResponse.token ?? apiResponse.access_token;
+
+    if (!token) {
+      throw new Error("Authentication response missing token.");
+    }
+
+    return { token, user: apiResponse.user };
   }
 
   // No demo fallback - require real backend authentication

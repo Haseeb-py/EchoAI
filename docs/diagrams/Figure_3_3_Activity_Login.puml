@@ -1,0 +1,61 @@
+@startuml Figure_3_3_Activity_Login
+!theme plain
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #EAF0FB
+skinparam ActivityBorderColor #3A6BC9
+skinparam ActivityDiamondBackgroundColor #FFF9C4
+skinparam ActivityDiamondBorderColor #F9A825
+skinparam ArrowColor #444444
+
+title Activity Diagram: User Login and Authentication
+
+start
+:User navigates to /login page;
+:System renders LoginForm\n(email + password fields);
+:User fills in email and password;
+:User submits the form;
+
+:Client-side validation\n(email format, required fields);
+if (Input valid?) then (No)
+  :Show validation error on form field;
+  stop
+else (Yes)
+  :POST /api/auth/login\n{email, password};
+  :Show loading spinner;
+  :FastAPI receives request;
+  :Query SQLite for user by email;
+  if (User record found?) then (No)
+    :Return HTTP 401\nInvalid credentials;
+    :Show error: "Invalid email or password";
+    stop
+  else (Yes)
+    :verify_password(plain, hashed) via PassLib;
+    if (Password matches?) then (No)
+      :Return HTTP 401\nInvalid credentials;
+      :Show error: "Invalid email or password";
+      stop
+    else (Yes)
+      :Check user.status;
+      if (status == active?) then (No — locked or inactive)
+        :Return HTTP 403\nAccount locked / inactive;
+        :Show error on form;
+        stop
+      else (Yes)
+        :create_access_token\n{sub: email, role, user_id, exp};
+        :Return 200 OK\n{access_token, user};
+        :Store token in localStorage (echoai_token);
+        :Store token in cookie (echoai_token);
+        :getRoleDefaultRoute(role);
+        if (role == admin?) then (Yes)
+          :Redirect to /admin;
+        else if (role == supervisor?) then (Yes)
+          :Redirect to /supervisor;
+        else (agent)
+          :Redirect to /dashboard;
+        endif
+        stop
+      endif
+    endif
+  endif
+endif
+@enduml

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Clock3,
@@ -19,60 +19,30 @@ import { AdminHeader, AdminSidebar } from "@/components/admin/AdminNavigation";
 import { AdminFormField, AdminMessage, AdminStatCard } from "@/components/admin/AdminScreenShell";
 import { Button } from "@/components/ui/Button";
 import { Badge, Card } from "@/components/ui/ui-components";
+import { getStoredAuthToken } from "@/lib/auth";
 
 type TeamUser = {
-  id: number;
+  id: string;
   name: string;
   email: string;
-  role: "Agent" | "Supervisor";
+  role: "Agent" | "Supervisor" | "Admin";
   status: "Active" | "Inactive" | "Locked";
   lastLogin: string;
   assignedCampaign: string;
 };
 
-const initialUsers: TeamUser[] = [
-  {
-    id: 1,
-    name: "Ayesha Khan",
-    email: "ayesha.agent@echoai.local",
-    role: "Agent",
-    status: "Active",
-    lastLogin: "Today, 10:20 AM",
-    assignedCampaign: "Q2 BPO Modernization Sprint",
-  },
-  {
-    id: 2,
-    name: "Hamza Malik",
-    email: "hamza.supervisor@echoai.local",
-    role: "Supervisor",
-    status: "Active",
-    lastLogin: "Today, 09:45 AM",
-    assignedCampaign: "All Campaigns",
-  },
-  {
-    id: 3,
-    name: "Mariam Shah",
-    email: "mariam.agent@echoai.local",
-    role: "Agent",
-    status: "Locked",
-    lastLogin: "Yesterday, 06:15 PM",
-    assignedCampaign: "Telecom Renewal Pilot",
-  },
-  {
-    id: 4,
-    name: "Usman Raza",
-    email: "usman.agent@echoai.local",
-    role: "Agent",
-    status: "Inactive",
-    lastLogin: "Apr 20, 2026",
-    assignedCampaign: "SaaS Expansion Calls",
-  },
-];
+type BackendUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+};
 
 const roleOptions = ["Agent", "Supervisor"] as const;
 
 export default function UserManagementPage() {
-  const [users, setUsers] = useState<TeamUser[]>(initialUsers);
+  const [users, setUsers] = useState<TeamUser[]>([]);
   const [query, setQuery] = useState("");
   const [newUser, setNewUser] = useState({
     name: "",
@@ -80,9 +50,10 @@ export default function UserManagementPage() {
     role: "Agent" as TeamUser["role"],
     password: "",
   });
-  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [selectedAccessUser, setSelectedAccessUser] = useState<TeamUser | null>(null);
-  const [message, setMessage] = useState("Create users here now; backend persistence will be connected later.");
+  const [message, setMessage] = useState("Create agents and supervisors to enable login access.");
+  const [loading, setLoading] = useState(false);
 
   const filteredUsers = useMemo(() => {
     const searchText = query.trim().toLowerCase();
@@ -102,7 +73,40 @@ export default function UserManagementPage() {
   const supervisorCount = users.filter((user) => user.role === "Supervisor").length;
   const agentCount = users.filter((user) => user.role === "Agent").length;
 
-  const createUser = (event: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    void loadUsers();
+  }, []);
+
+  async function loadUsers() {
+    const token = getStoredAuthToken();
+    if (!token) {
+      setMessage("Login as admin to load users.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await fetch("/api/admin/users", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        setMessage(await parseAdminError(response));
+        return;
+      }
+
+      const data = (await response.json()) as BackendUser[];
+      setUsers(data.map(mapBackendUser));
+    } catch {
+      setMessage("Unable to load users. Please confirm the backend is running.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const cleanName = newUser.name.trim();
     const cleanEmail = newUser.email.trim();
@@ -118,63 +122,150 @@ export default function UserManagementPage() {
       return;
     }
 
-    setUsers((currentUsers) => [
-      {
-        id: Date.now(),
-        name: cleanName,
-        email: cleanEmail,
-        role: newUser.role,
-        status: "Active",
-        lastLogin: "Invite pending",
-        assignedCampaign: newUser.role === "Supervisor" ? "All Campaigns" : "Unassigned",
-      },
-      ...currentUsers,
-    ]);
-    setNewUser({ name: "", email: "", role: "Agent", password: "" });
-    setMessage(`${cleanName} has been added as an ${newUser.role}. This is saved in the current frontend session only.`);
-  };
+    const token = getStoredAuthToken();
+    if (!token) {
+      setMessage("Login as admin to create users.");
+      return;
+    }
 
-  const updateStatus = (id: number, status: TeamUser["status"]) => {
-    setUsers((currentUsers) => currentUsers.map((user) => (user.id === id ? { ...user, status } : user)));
-    setOpenMenuId(null);
-    setSelectedAccessUser((currentUser) => (currentUser?.id === id ? { ...currentUser, status } : currentUser));
-    const statusMessages = {
-      Active: "Account activated and can now access the workspace.",
-      Locked: "Account locked. The user cannot log in until an admin unlocks it.",
-      Inactive: "Account deactivated without deleting historical data.",
-    };
-    setMessage(statusMessages[status]);
-  };
+    setMessage("Creating user in the backend...");
 
-  const switchRole = (id: number) => {
-    setUsers((currentUsers) =>
-      currentUsers.map((user) =>
-        user.id === id
-          ? {
-              ...user,
-              role: user.role === "Agent" ? "Supervisor" : "Agent",
-              assignedCampaign: user.role === "Agent" ? "All Campaigns" : "Unassigned",
-            }
-          : user
-      )
-    );
-    setSelectedAccessUser((currentUser) =>
-      currentUser?.id === id
-        ? {
-            ...currentUser,
-            role: currentUser.role === "Agent" ? "Supervisor" : "Agent",
-            assignedCampaign: currentUser.role === "Agent" ? "All Campaigns" : "Unassigned",
-          }
-        : currentUser
-    );
-    setOpenMenuId(null);
-    setMessage("User role updated in the current frontend session.");
-  };
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: cleanName,
+          email: cleanEmail,
+          password: cleanPassword,
+          role: newUser.role.toLowerCase(),
+          status: "active",
+        }),
+      });
 
-  const resetPassword = (user: TeamUser) => {
-    setOpenMenuId(null);
-    setMessage(`Password reset invite prepared for ${user.email}. Backend email delivery will be connected later.`);
-  };
+      if (!response.ok) {
+        setMessage(await parseAdminError(response));
+        return;
+      }
+
+      const created = (await response.json()) as BackendUser;
+      const roleLabel = created.role === "supervisor" ? "Supervisor" : "Agent";
+
+      setUsers((currentUsers) => [mapBackendUser(created), ...currentUsers]);
+      setNewUser({ name: "", email: "", role: "Agent", password: "" });
+      setMessage(`${created.name} has been added as an ${roleLabel}. Login is now enabled.`);
+    } catch (error) {
+      setMessage("Unable to create user. Please confirm the backend is running and try again.");
+    }
+  }
+
+  async function updateStatus(id: string, status: TeamUser["status"]) {
+    const token = getStoredAuthToken();
+    if (!token) {
+      setMessage("Login as admin to update user status.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/users/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: status.toLowerCase() }),
+      });
+
+      if (!response.ok) {
+        setMessage(await parseAdminError(response));
+        return;
+      }
+
+      const updated = (await response.json()) as BackendUser;
+      setUsers((currentUsers) => currentUsers.map((user) => (user.id === id ? mapBackendUser(updated) : user)));
+      setSelectedAccessUser((currentUser) => (currentUser?.id === id ? mapBackendUser(updated) : currentUser));
+      setOpenMenuId(null);
+
+      const statusMessages = {
+        Active: "Account activated and can now access the workspace.",
+        Locked: "Account locked. The user cannot log in until an admin unlocks it.",
+        Inactive: "Account deactivated without deleting historical data.",
+      };
+      setMessage(statusMessages[status]);
+    } catch {
+      setMessage("Unable to update status. Please confirm the backend is running.");
+    }
+  }
+
+  async function switchRole(id: string) {
+    const token = getStoredAuthToken();
+    if (!token) {
+      setMessage("Login as admin to update user roles.");
+      return;
+    }
+
+    const user = users.find((entry) => entry.id === id);
+    if (!user) {
+      return;
+    }
+
+    const nextRole = user.role === "Agent" ? "supervisor" : "agent";
+
+    try {
+      const response = await fetch(`/api/admin/users/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ role: nextRole }),
+      });
+
+      if (!response.ok) {
+        setMessage(await parseAdminError(response));
+        return;
+      }
+
+      const updated = (await response.json()) as BackendUser;
+      setUsers((currentUsers) => currentUsers.map((entry) => (entry.id === id ? mapBackendUser(updated) : entry)));
+      setSelectedAccessUser((currentUser) => (currentUser?.id === id ? mapBackendUser(updated) : currentUser));
+      setOpenMenuId(null);
+      setMessage("User role updated.");
+    } catch {
+      setMessage("Unable to update role. Please confirm the backend is running.");
+    }
+  }
+
+  async function resetPassword(user: TeamUser) {
+    const token = getStoredAuthToken();
+    if (!token) {
+      setMessage("Login as admin to reset passwords.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/reset-password`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        setMessage(await parseAdminError(response));
+        return;
+      }
+
+      const data = (await response.json()) as { temporary_password: string };
+      setOpenMenuId(null);
+      setMessage(`Temporary password for ${user.email}: ${data.temporary_password}`);
+    } catch {
+      setMessage("Unable to reset password. Please confirm the backend is running.");
+    }
+  }
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#080A13] text-white">
@@ -284,6 +375,9 @@ export default function UserManagementPage() {
                 </div>
 
                 <div className="space-y-3">
+                  {loading && users.length === 0 ? (
+                    <div className="rounded-[16px] border border-white/[0.06] bg-white/[0.025] p-4 text-[12px] text-white/60">Loading users...</div>
+                  ) : null}
                   {filteredUsers.map((user) => (
                     <div key={user.id} className="rounded-[16px] border border-white/[0.06] bg-white/[0.025] p-4">
                       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -424,7 +518,7 @@ function AccountStatusActions({
   onStatusChange,
 }: {
   user: TeamUser;
-  onStatusChange: (id: number, status: TeamUser["status"]) => void;
+  onStatusChange: (id: string, status: TeamUser["status"]) => void;
 }) {
   if (user.status === "Active") {
     return (
@@ -525,4 +619,28 @@ function AccessField({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-[12px] leading-5 text-white/74">{value}</div>
     </div>
   );
+}
+
+async function parseAdminError(response: Response) {
+  try {
+    const body = (await response.json()) as { detail?: string; message?: string; error?: string };
+    return body.detail || body.message || body.error || "Unable to complete request.";
+  } catch {
+    return "Unable to complete request.";
+  }
+}
+
+function mapBackendUser(user: BackendUser): TeamUser {
+  const roleLabel = user.role === "admin" ? "Admin" : user.role === "supervisor" ? "Supervisor" : "Agent";
+  const statusLabel = user.status === "locked" ? "Locked" : user.status === "inactive" ? "Inactive" : "Active";
+
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: roleLabel,
+    status: statusLabel,
+    lastLogin: "Invite pending",
+    assignedCampaign: roleLabel === "Supervisor" ? "All Campaigns" : "Unassigned",
+  };
 }

@@ -91,7 +91,7 @@ export default function SupervisorDashboardPage() {
   return (
     <SupervisorScreenShell
       activeKey="overview"
-      contextLabel="Supervisor Overview"
+      contextLabel=""
       eyebrow="Supervisor / Command Center"
       title="Supervisor Dashboard"
       description="Monitor live operations, triage escalations, and route actions across supervisor workflows."

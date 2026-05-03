@@ -1,0 +1,63 @@
+@startuml Figure_4_3_Middleware_RBAC_Flow
+!theme plain
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #EAF0FB
+skinparam ActivityBorderColor #3A6BC9
+skinparam ActivityDiamondBackgroundColor #FFF9C4
+skinparam ActivityDiamondBorderColor #F9A825
+skinparam ArrowColor #444444
+
+title Middleware RBAC Logic Flow (middleware.ts)
+
+start
+:Incoming HTTP request;
+:Path matches /dashboard,\n/supervisor, or /admin?;
+if (Protected path?) then (No)
+  :Allow — pass through to page;
+  stop
+else (Yes)
+  :Read echoai_token from cookie;
+  if (Cookie present?) then (No)
+    :302 Redirect → /login;
+    stop
+  else (Yes)
+    :Decode JWT payload\n(no signature verification);
+    if (Token structure valid?) then (No)
+      :302 Redirect → /login;
+      stop
+    else (Yes)
+      :Check exp claim vs. Date.now();
+      if (Token expired?) then (Yes)
+        :302 Redirect → /login;
+        stop
+      else (No)
+        :Extract role claim from payload;
+        if (role == "agent") then (Yes)
+          if (Path starts with /dashboard?) then (Yes)
+            :Allow → render page;
+            stop
+          else (No)
+            :302 Redirect → /login;
+            stop
+          endif
+        else if (role == "supervisor") then (Yes)
+          if (Path starts with /supervisor?) then (Yes)
+            :Allow → render page;
+            stop
+          else (No)
+            :302 Redirect → /login;
+            stop
+          endif
+        else if (role == "admin") then (Yes)
+          :Allow all protected paths\n(/admin, /supervisor, /dashboard);
+          :Render page;
+          stop
+        else (unknown role)
+          :302 Redirect → /login;
+          stop
+        endif
+      endif
+    endif
+  endif
+endif
+@enduml

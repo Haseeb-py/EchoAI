@@ -1,0 +1,60 @@
+@startuml Figure_3_10_State_User_Account
+!theme plain
+skinparam defaultFontName Arial
+skinparam stateBackgroundColor #EAF0FB
+skinparam stateBorderColor #3A6BC9
+skinparam stateArrowColor #444444
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #F9A825
+
+title State Transition Diagram: User Account Status Lifecycle
+
+[*] --> Pending : Admin submits\nCreate User form
+
+state Pending
+Pending : Account created, not yet confirmed
+
+Pending --> Active : POST /api/admin/users\n201 Created — account initialized
+
+state Active
+Active : Can authenticate (login)
+Active : Can access role routes
+Active : Password reset allowed
+
+Active --> Locked : Admin clicks Lock\nPUT .../{id} {status: "locked"}
+Active --> Inactive : Admin clicks Deactivate\nPUT .../{id} {status: "inactive"}
+Active --> Active : Admin resets password\nPOST .../{id}/reset-password
+
+state Locked
+Locked : Cannot authenticate
+Locked : Login returns 403 Account Locked
+Locked : All sessions effectively invalid
+
+state Inactive
+Inactive : Cannot authenticate
+Inactive : Login returns 403 Account Inactive
+Inactive : Requires admin to reactivate
+
+Locked --> Active : Admin clicks Unlock\nPUT .../{id} {status: "active"}
+Inactive --> Active : Admin reactivates\nPUT .../{id} {status: "active"}
+
+Locked --> [*] : Permanently removed\n(future: DELETE endpoint)
+Inactive --> [*] : Permanently removed\n(future: DELETE endpoint)
+
+note right of Active
+  Default state when
+  account is first created
+end note
+
+note right of Locked
+  Temporary suspension.
+  Configuration preserved.
+  Reversible by admin.
+end note
+
+note right of Inactive
+  Permanent suspension.
+  Requires explicit
+  admin reactivation.
+end note
+@enduml

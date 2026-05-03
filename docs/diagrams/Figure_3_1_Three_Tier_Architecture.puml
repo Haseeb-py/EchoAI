@@ -1,0 +1,60 @@
+@startuml Figure_3_1_Three_Tier_Architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam ArrowColor #444444
+skinparam componentBorderColor #555555
+skinparam packageBorderColor #888888
+skinparam packageBackgroundColor #F5F8FF
+skinparam componentBackgroundColor #EAF0FB
+
+title EchoAI — Conceptual Three-Tier Architecture
+
+package "Presentation Tier (Next.js Frontend)" as PT {
+  [Browser / User Interface] as UI
+  [Next.js Middleware\n(RBAC Gateway)] as MW
+  [/dashboard — Agent View] as AV
+  [/supervisor — Supervisor View] as SV
+  [/admin — Admin View] as ADV
+}
+
+package "Application Tier (FastAPI Backend)" as AT {
+  [Next.js API Proxy\n(/api/* → http://127.0.0.1:8000)] as PROXY
+  [FastAPI REST Server\n(Uvicorn)] as FAST
+  [Auth Module\n(routes/auth.py)] as AUTH
+  [Script/Persona/Campaign Module\n(routes/admin.py)] as SPC
+  [Dependency Guards\n(deps.py: get_current_user,\nget_current_admin)] as DEPS
+}
+
+package "Data Tier (SQLite via SQLAlchemy ORM)" as DT {
+  database "echoai.db\n(SQLite)" as DB
+  [SQLAlchemy ORM\n(models/)] as ORM
+}
+
+UI --> MW : All protected requests
+MW --> AV : role=agent ✓
+MW --> SV : role=supervisor ✓
+MW --> ADV : role=admin ✓
+MW --> PROXY : Authenticated requests
+PROXY --> FAST : Rewrites /api/* to :8000
+FAST --> AUTH
+FAST --> SPC
+FAST --> DEPS
+AUTH --> ORM
+SPC --> ORM
+DEPS --> ORM
+ORM --> DB
+
+note right of MW
+  Decodes JWT from cookie
+  Checks role vs. route prefix
+  Redirects to /login on failure
+end note
+
+note right of PROXY
+  Configured in next.config.mjs
+  Hides backend origin from browser
+  Eliminates CORS issues
+end note
+@enduml

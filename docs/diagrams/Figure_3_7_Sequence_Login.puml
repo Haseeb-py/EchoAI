@@ -1,0 +1,71 @@
+@startuml Figure_3_7_Sequence_Login
+!theme plain
+skinparam defaultFontName Arial
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #3A6BC9
+skinparam sequenceParticipantBackgroundColor #EAF0FB
+skinparam sequenceLifeLineBorderColor #999999
+skinparam sequenceBoxBackgroundColor #F5F8FF
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #F9A825
+skinparam databaseBackgroundColor #FFF3E0
+skinparam databaseBorderColor #FB8C00
+
+title Sequence Diagram: Login and JWT Token Issuance
+
+actor "User\n(Browser)" as U
+participant "LoginForm\nComponent" as LF
+participant "src/lib/auth.ts" as AUTH
+participant "Next.js\nAPI Proxy\n(next.config.mjs)" as PROXY
+participant "FastAPI\n/api/auth/login" as FAST
+participant "PassLib\n(bcrypt)" as PASS
+participant "PyJWT" as JWT
+database "SQLite DB" as DB
+participant "Next.js\nRouter" as ROUTER
+
+U -> LF : Submit form (email, password)
+LF -> LF : Client-side validation
+LF -> AUTH : loginWithPassword(email, password)
+AUTH -> PROXY : POST /api/auth/login\n{email, password}
+PROXY -> FAST : Forward → http://127.0.0.1:8000/api/auth/login
+
+FAST -> DB : SELECT * FROM users WHERE email = ?
+DB --> FAST : User record
+
+alt User not found
+  FAST --> PROXY : 401 {detail: "Invalid credentials"}
+  PROXY --> AUTH : 401
+  AUTH --> LF : Error response
+  LF --> U : Show "Invalid email or password"
+else User found
+  FAST -> PASS : verify_password(plain, hashed_password)
+  PASS --> FAST : True / False
+
+  alt Password mismatch
+    FAST --> PROXY : 401 {detail: "Invalid credentials"}
+    PROXY --> AUTH : 401
+    AUTH --> LF : Error response
+    LF --> U : Show "Invalid email or password"
+  else Password correct
+    FAST -> FAST : Check user.status == "active"
+
+    alt status is locked or inactive
+      FAST --> PROXY : 403 {detail: "Account is locked/inactive"}
+      PROXY --> AUTH : 403
+      AUTH --> LF : Error response
+      LF --> U : Show account status error
+    else status == active
+      FAST -> JWT : create_access_token\n{sub: email, role, user_id, exp}
+      JWT --> FAST : Signed JWT string
+
+      FAST --> PROXY : 200 {access_token, user}
+      PROXY --> AUTH : 200 response
+      AUTH -> AUTH : Store token in localStorage\n(key: echoai_token)
+      AUTH -> AUTH : Store token in cookie\n(key: echoai_token)
+      AUTH --> LF : Return user object
+      LF -> ROUTER : getRoleDefaultRoute(role)
+      ROUTER --> U : Redirect to /admin | /supervisor | /dashboard
+    end
+  end
+end
+@enduml
