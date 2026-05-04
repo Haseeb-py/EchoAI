@@ -1,7 +1,8 @@
-﻿import sys
+import sys
 from uuid import uuid4
 from sqlalchemy.orm import Session
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
+from app.db.base import Base
 from app.models.user import User
 from app.core.security import hash_password
 
@@ -12,6 +13,8 @@ TEST_USERS = [
 ]
 
 def seed_users():
+    print("Creating database tables...")
+    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         for user_data in TEST_USERS:
