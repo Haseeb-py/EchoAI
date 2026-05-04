@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { apiGet } from "@/lib/api-client";
+import { getStoredAuthToken } from "@/lib/auth";
 import {
   readSupervisorLiveCalls,
   SUPERVISOR_LIVE_CALLS_CHANGE_EVENT,
@@ -11,11 +13,35 @@ type AgentCampaignStatus = "Ready" | "Running" | "Paused";
 type LeadStatus = "Hot" | "Warm" | "Cold";
 type CallOutcome = "Converted" | "Pending" | "Lost";
 
+type BackendAgentCampaign = {
+  id: string;
+  name: string;
+  product: string;
+  audience: string;
+  goal: string;
+  status: string;
+  script: {
+    id: string;
+    title: string;
+    summary: string;
+    content: string;
+    is_active: boolean;
+  } | null;
+  persona: {
+    id: string;
+    name: string;
+    tone: string;
+    description: string;
+    is_active: boolean;
+  } | null;
+};
+
 export type AgentScriptItem = {
   id: string;
   campaignId: string;
   title: string;
   summary: string;
+  content: string;
 };
 
 export type AgentCampaign = {
@@ -24,6 +50,9 @@ export type AgentCampaign = {
   product: string;
   audience: string;
   persona: "Friendly" | "Professional" | "Empathetic";
+  personaName?: string;
+  personaTone?: string;
+  personaDescription?: string;
   status: AgentCampaignStatus;
   leadPool: number;
   defaultBatchSize: number;
@@ -74,6 +103,8 @@ export const AGENT_SCRIPTS_KEY = "echoai_agent_scripts";
 export const AGENT_STATE_CHANGE_EVENT = "echoai_agent_state_changed";
 
 const DEFAULT_AGENT_NAME = "Agent Desk";
+const DEFAULT_LEAD_POOL = 18;
+const DEFAULT_BATCH_SIZE = 3;
 
 const defaultCampaigns: AgentCampaign[] = [
   {
@@ -112,12 +143,12 @@ const defaultCampaigns: AgentCampaign[] = [
 ];
 
 const defaultScripts: AgentScriptItem[] = [
-  { id: "script-bpo-01", campaignId: "cmp-agent-01", title: "BPO Discovery Flow", summary: "Qualification and handoff script for modernization leads." },
-  { id: "script-bpo-02", campaignId: "cmp-agent-01", title: "BPO Objection Recovery", summary: "Handles pricing and implementation concerns." },
-  { id: "script-telco-01", campaignId: "cmp-agent-02", title: "Renewal Retention Flow", summary: "Retention path for telecom renewal conversations." },
-  { id: "script-telco-02", campaignId: "cmp-agent-02", title: "Escalation Save Flow", summary: "Supervisor-safe recovery sequence for at-risk calls." },
-  { id: "script-saas-01", campaignId: "cmp-agent-03", title: "Expansion Discovery Flow", summary: "Find expansion fit and route to follow-up." },
-  { id: "script-saas-02", campaignId: "cmp-agent-03", title: "Procurement Close Flow", summary: "Use when the customer is already comparing vendors." },
+  { id: "script-bpo-01", campaignId: "cmp-agent-01", title: "BPO Discovery Flow", summary: "Qualification and handoff script for modernization leads.", content: "" },
+  { id: "script-bpo-02", campaignId: "cmp-agent-01", title: "BPO Objection Recovery", summary: "Handles pricing and implementation concerns.", content: "" },
+  { id: "script-telco-01", campaignId: "cmp-agent-02", title: "Renewal Retention Flow", summary: "Retention path for telecom renewal conversations.", content: "" },
+  { id: "script-telco-02", campaignId: "cmp-agent-02", title: "Escalation Save Flow", summary: "Supervisor-safe recovery sequence for at-risk calls.", content: "" },
+  { id: "script-saas-01", campaignId: "cmp-agent-03", title: "Expansion Discovery Flow", summary: "Find expansion fit and route to follow-up.", content: "" },
+  { id: "script-saas-02", campaignId: "cmp-agent-03", title: "Procurement Close Flow", summary: "Use when the customer is already comparing vendors.", content: "" },
 ];
 
 const defaultLeads: AgentLeadItem[] = [
@@ -377,6 +408,63 @@ function normalizeCampaigns(campaigns: AgentCampaign[], activeCalls: AgentLiveCa
   }));
 }
 
+function mapPersonaLabel(persona: BackendAgentCampaign["persona"]): AgentCampaign["persona"] {
+  const value = `${persona?.name ?? ""} ${persona?.tone ?? ""}`.toLowerCase();
+  if (value.includes("friendly")) {
+    return "Friendly";
+  }
+  if (value.includes("empathetic") || value.includes("empathy")) {
+    return "Empathetic";
+  }
+  return "Professional";
+}
+
+function mapCampaignStatus(status: string): AgentCampaignStatus {
+  if (status === "paused") {
+    return "Paused";
+  }
+  return "Ready";
+}
+
+async function syncAgentCampaignsFromApi() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const token = getStoredAuthToken();
+  if (!token) {
+    return;
+  }
+
+  const data = await apiGet<BackendAgentCampaign[]>("/api/agent/campaigns", token);
+  const campaigns = data.map((campaign) => ({
+    id: campaign.id,
+    name: campaign.name,
+    product: campaign.product,
+    audience: campaign.audience,
+    persona: mapPersonaLabel(campaign.persona),
+    personaName: campaign.persona?.name,
+    personaTone: campaign.persona?.tone,
+    personaDescription: campaign.persona?.description,
+    status: mapCampaignStatus(campaign.status),
+    leadPool: DEFAULT_LEAD_POOL,
+    defaultBatchSize: DEFAULT_BATCH_SIZE,
+    lastLaunchedAt: null,
+  }));
+  const scripts = data
+    .filter((campaign) => campaign.script && campaign.script.is_active)
+    .map((campaign) => ({
+      id: campaign.script!.id,
+      campaignId: campaign.id,
+      title: campaign.script!.title,
+      summary: campaign.script!.summary || "",
+      content: campaign.script!.content || "",
+    }));
+
+  writeAgentCampaigns(campaigns);
+  writeAgentScripts(scripts);
+}
+
 export function readAgentCampaigns() {
   return readLocalStorage(AGENT_CAMPAIGNS_KEY, defaultCampaigns);
 }
@@ -397,6 +485,11 @@ export function writeAgentLeads(value: AgentLeadItem[]) {
 
 export function readAgentScripts() {
   return readLocalStorage(AGENT_SCRIPTS_KEY, defaultScripts);
+}
+
+export function writeAgentScripts(value: AgentScriptItem[]) {
+  writeLocalStorage(AGENT_SCRIPTS_KEY, value);
+  emitAgentStateChange();
 }
 
 export function readAgentCallHistory() {
@@ -579,6 +672,7 @@ export function useAgentCampaigns() {
     }
 
     sync();
+    syncAgentCampaignsFromApi().catch(() => null);
     window.addEventListener(AGENT_STATE_CHANGE_EVENT, sync);
     window.addEventListener("storage", sync);
 
@@ -589,6 +683,27 @@ export function useAgentCampaigns() {
   }, []);
 
   return [campaigns, setCampaigns] as const;
+}
+
+export function useAgentScripts() {
+  const [scripts, setScripts] = useState<AgentScriptItem[]>(() => readAgentScripts());
+
+  useEffect(() => {
+    function sync() {
+      setScripts(readAgentScripts());
+    }
+
+    sync();
+    window.addEventListener(AGENT_STATE_CHANGE_EVENT, sync);
+    window.addEventListener("storage", sync);
+
+    return () => {
+      window.removeEventListener(AGENT_STATE_CHANGE_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
+  return [scripts, setScripts] as const;
 }
 
 export function useAgentCallHistory() {

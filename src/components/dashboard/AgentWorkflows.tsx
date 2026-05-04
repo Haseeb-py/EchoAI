@@ -32,6 +32,7 @@ import {
   useAgentCallHistory,
   useAgentCampaigns,
   useAgentLeads,
+  useAgentScripts,
 } from "@/lib/agent-state";
 import { formatLiveCallDuration, liveCallSentimentLabel, liveCallStatusLabel } from "@/components/supervisor/live-calls";
 import { AgentScreenShell } from "@/components/dashboard/AgentScreenShell";
@@ -209,6 +210,7 @@ export function AgentDashboardPage() {
 export function AgentCampaignsPage() {
   const [campaigns, setCampaigns] = useAgentCampaigns();
   const [activeCalls] = useAgentActiveCalls();
+  const [scripts] = useAgentScripts();
   const [batchSize, setBatchSize] = useState(3);
   const [selectedCampaignId, setSelectedCampaignId] = useState(campaigns[0]?.id ?? "");
   const [selectedScriptId, setSelectedScriptId] = useState("");
@@ -216,8 +218,8 @@ export function AgentCampaignsPage() {
 
   const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? campaigns[0] ?? null;
   const availableScripts = useMemo(
-    () => readAgentScripts().filter((script) => script.campaignId === selectedCampaign?.id),
-    [selectedCampaign?.id]
+    () => scripts.filter((script) => script.campaignId === selectedCampaign?.id),
+    [scripts, selectedCampaign?.id]
   );
   const selectedScript = availableScripts.find((script) => script.id === selectedScriptId) ?? null;
   const totalLeads = campaigns.reduce((sum, campaign) => sum + campaign.leadPool, 0);
@@ -304,6 +306,20 @@ export function AgentCampaignsPage() {
           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/38">Launch Session</div>
           <div className="mt-2 text-[26px] font-semibold tracking-[-0.03em] text-white">{selectedCampaign?.name ?? "No campaign selected"}</div>
           <div className="mt-1 text-[13px] text-white/50">{selectedCampaign ? `${selectedCampaign.persona} tone with ${selectedCampaign.leadPool} leads ready.` : "Pick a campaign from the list."}</div>
+          {selectedCampaign ? (
+            <div className="mt-3 rounded-[12px] border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 text-[12px] text-white/60">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/38">Persona</div>
+              <div className="mt-1 text-[12px] text-white/70">
+                {selectedCampaign.personaName || selectedCampaign.persona}
+              </div>
+              <div className="mt-1 text-[12px] text-white/56">
+                {selectedCampaign.personaTone || ""}
+              </div>
+              {selectedCampaign.personaDescription ? (
+                <div className="mt-1 text-[12px] text-white/50">{selectedCampaign.personaDescription}</div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="mt-5 rounded-[14px] border border-white/[0.06] bg-white/[0.02] p-4">
             <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/38">Step 2 / Select Script</div>
@@ -335,6 +351,17 @@ export function AgentCampaignsPage() {
               )}
             </div>
           </div>
+
+          {selectedScript ? (
+            <div className="mt-4 rounded-[14px] border border-white/[0.06] bg-white/[0.02] p-4">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/38">Script Preview</div>
+              <div className="mt-2 text-[13px] font-semibold text-white">{selectedScript.title}</div>
+              <div className="mt-1 text-[12px] text-white/56">{selectedScript.summary || "No summary provided."}</div>
+              <div className="mt-3 whitespace-pre-wrap rounded-[12px] border border-white/[0.08] bg-[#141828] p-3 text-[12px] leading-5 text-white/70">
+                {selectedScript.content || "No script content available yet."}
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="block">

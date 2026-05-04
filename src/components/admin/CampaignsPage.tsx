@@ -1,10 +1,12 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, CheckCircle2, Clock3, Copy, Megaphone, PauseCircle, Radio, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock3, Megaphone, Pencil, Radio, SlidersHorizontal, Trash2 } from "lucide-react";
 import { AdminHeader, AdminSidebar } from "@/components/admin/AdminNavigation";
 import { Badge, Card, ProgressBar } from "@/components/ui/ui-components";
+import { apiDelete, apiGet, apiPost } from "@/lib/api-client";
+import { getStoredAuthToken } from "@/lib/auth";
 
 const CAMPAIGN_DRAFT_KEY = "echoai_campaign_draft";
 
@@ -15,35 +17,19 @@ type CampaignDraftForm = {
   goal: string;
 };
 
-const campaigns = [
-  {
-    name: "Q2 BPO Modernization Sprint",
-    status: "Draft",
-    product: "EchoAI Voice Automation Suite",
-    audience: "Mid-market BPO owners",
-    setup: 86,
-    leads: "1,240",
-    persona: "Professional",
-  },
-  {
-    name: "Telecom Renewal Pilot",
-    status: "Draft",
-    product: "Retention automation",
-    audience: "Telecom renewal accounts",
-    setup: 42,
-    leads: "680",
-    persona: "Empathetic",
-  },
-  {
-    name: "SaaS Expansion Calls",
-    status: "Active",
-    product: "Expansion package",
-    audience: "Existing SaaS accounts",
-    setup: 100,
-    leads: "2,050",
-    persona: "Friendly",
-  },
-];
+type CampaignRecord = {
+  id: string;
+  name: string;
+  product: string;
+  audience: string;
+  goal?: string;
+  context?: string;
+  status: string;
+  script_id?: string | null;
+  persona_id?: string | null;
+};
+
+const fallbackCampaigns: CampaignRecord[] = [];
 
 const lifecycle = [
   "Create campaign draft",
@@ -61,8 +47,60 @@ export default function CampaignsPage() {
     goal: "Qualify prospects for a 90-day pilot",
   });
   const [error, setError] = useState("");
+  const [campaigns, setCampaigns] = useState<CampaignRecord[]>(fallbackCampaigns);
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState("");
 
-  const saveDraftAndContinue = (event: FormEvent<HTMLFormElement>) => {
+  const loadCampaigns = useCallback(async () => {
+    try {
+      const token = getStoredAuthToken();
+      const data = await apiGet<CampaignRecord[]>("/api/admin/campaigns", token);
+      setCampaigns(data);
+      setApiError("");
+    } catch (fetchError) {
+      setApiError(fetchError instanceof Error ? fetchError.message : "Unable to load campaigns.");
+      setCampaigns(fallbackCampaigns);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchCampaigns() {
+      if (cancelled) {
+        return;
+      }
+
+      await loadCampaigns();
+    }
+
+    fetchCampaigns();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadCampaigns]);
+
+  const campaignCards = useMemo(() => {
+    return campaigns.map((campaign) => {
+      const hasScript = Boolean(campaign.script_id);
+      const hasPersona = Boolean(campaign.persona_id);
+      const hasContext = Boolean((campaign.goal || campaign.context || "").trim());
+      const setupScore = Math.round(((Number(hasScript) + Number(hasPersona) + Number(hasContext)) / 3) * 100);
+      const statusLabel = campaign.status ? campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1) : "Draft";
+
+      return {
+        ...campaign,
+        statusLabel,
+        setup: setupScore,
+        leads: "-",
+        persona: campaign.persona_id ? "Linked" : "Unassigned",
+      };
+    });
+  }, [campaigns]);
+
+  const saveDraftAndContinue = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const cleanedDraft = {
       name: draft.name.trim(),
@@ -78,25 +116,75 @@ export default function CampaignsPage() {
       return;
     }
 
-    localStorage.setItem(CAMPAIGN_DRAFT_KEY, JSON.stringify(cleanedDraft));
-    setError("");
-    router.push("/admin/setup");
+    try {
+      const token = getStoredAuthToken();
+      const created = await apiPost<CampaignRecord>("/api/admin/campaigns", {
+        name: cleanedDraft.name,
+        product: cleanedDraft.product,
+        audience: cleanedDraft.audience,
+        goal: cleanedDraft.goal,
+        status: "draft",
+      }, token);
+
+      localStorage.setItem(
+        CAMPAIGN_DRAFT_KEY,
+        JSON.stringify({
+          ...cleanedDraft,
+          id: created.id,
+          status: created.status || "Draft",
+        })
+      );
+      setError("");
+      router.push("/admin/setup");
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Unable to create campaign.");
+    }
   };
 
-  const openExistingCampaign = (campaign: (typeof campaigns)[number]) => {
+  const openExistingCampaign = (campaign: CampaignRecord) => {
     localStorage.setItem(
       CAMPAIGN_DRAFT_KEY,
       JSON.stringify({
+        id: campaign.id,
         name: campaign.name,
         product: campaign.product,
         audience: campaign.audience,
-        goal: campaign.status === "Active" ? "Optimize active calling performance" : "Complete setup before campaign activation",
+        goal: campaign.goal || campaign.context || "",
         status: campaign.status,
-        persona: campaign.persona,
+        persona: campaign.persona_id ? "Linked" : "",
         createdAt: new Date().toISOString(),
       })
     );
     router.push("/admin/setup");
+  };
+
+  const openEditCampaign = (campaignId: string) => {
+    router.push(`/admin/campaigns/${campaignId}/edit`);
+  };
+
+  const activateCampaign = async (campaignId: string) => {
+    try {
+      const token = getStoredAuthToken();
+      await apiPost(`/api/admin/campaigns/${campaignId}/activate`, undefined, token);
+      await loadCampaigns();
+    } catch (activateError) {
+      setApiError(activateError instanceof Error ? activateError.message : "Unable to activate campaign.");
+    }
+  };
+
+  const deleteCampaign = async (campaignId: string) => {
+    const confirmed = window.confirm("Are you sure you want to delete this campaign? This cannot be undone.");
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const token = getStoredAuthToken();
+      await apiDelete(`/api/admin/campaigns/${campaignId}`, token);
+      await loadCampaigns();
+    } catch (deleteError) {
+      setApiError(deleteError instanceof Error ? deleteError.message : "Unable to delete campaign.");
+    }
   };
 
   return (
@@ -129,18 +217,28 @@ export default function CampaignsPage() {
                     <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/38">Campaign Records</div>
                     <h2 className="mt-1 font-headline text-[28px] font-semibold tracking-[-0.03em] text-white">All Campaigns</h2>
                   </div>
-                  <Badge color="primary" className="!uppercase !tracking-[0.1em]">3 Total</Badge>
+                  <Badge color="primary" className="!uppercase !tracking-[0.1em]">{campaignCards.length} Total</Badge>
                 </div>
 
                 <div className="space-y-3">
-                  {campaigns.map((campaign) => (
-                    <div key={campaign.name} className="rounded-[14px] border border-white/[0.06] bg-white/[0.025] p-3.5">
+                  {loading ? (
+                    <div className="rounded-[14px] border border-white/[0.06] bg-white/[0.02] p-4 text-[12px] text-white/60">
+                      Loading campaigns...
+                    </div>
+                  ) : null}
+                  {apiError ? (
+                    <div className="rounded-[14px] border border-red-400/20 bg-red-500/10 p-4 text-[12px] text-red-200">
+                      {apiError}
+                    </div>
+                  ) : null}
+                  {campaignCards.map((campaign) => (
+                    <div key={campaign.id} className="rounded-[14px] border border-white/[0.06] bg-white/[0.025] p-3.5">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="font-headline text-[21px] font-semibold leading-tight tracking-[-0.03em] text-white">{campaign.name}</h3>
-                            <Badge color={campaign.status === "Active" ? "success" : "tertiary"} className="!uppercase !tracking-[0.1em]">
-                              {campaign.status}
+                            <Badge color={campaign.status === "active" ? "success" : "tertiary"} className="!uppercase !tracking-[0.1em]">
+                              {campaign.statusLabel}
                             </Badge>
                           </div>
                           <p className="mt-1.5 text-[12px] leading-5 text-white/48">
@@ -148,11 +246,11 @@ export default function CampaignsPage() {
                           </p>
                         </div>
                         <div className="flex gap-2">
-                          <button type="button" className="grid h-9 w-9 place-items-center rounded-[10px] border border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.06]" aria-label="Duplicate campaign">
-                            <Copy size={14} strokeWidth={2.1} aria-hidden="true" />
+                          <button type="button" onClick={() => openEditCampaign(campaign.id)} className="grid h-9 w-9 place-items-center rounded-[10px] border border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.06]" aria-label="Edit campaign">
+                            <Pencil size={14} strokeWidth={2.1} aria-hidden="true" />
                           </button>
-                          <button type="button" className="grid h-9 w-9 place-items-center rounded-[10px] border border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.06]" aria-label="Pause campaign">
-                            <PauseCircle size={14} strokeWidth={2.1} aria-hidden="true" />
+                          <button type="button" onClick={() => deleteCampaign(campaign.id)} className="grid h-9 w-9 place-items-center rounded-[10px] border border-red-400/30 bg-red-500/10 text-red-100 hover:bg-red-500/20" aria-label="Delete campaign">
+                            <Trash2 size={14} strokeWidth={2.1} aria-hidden="true" />
                           </button>
                         </div>
                       </div>
@@ -185,8 +283,9 @@ export default function CampaignsPage() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => activateCampaign(campaign.id)}
                           className="inline-flex h-8 items-center gap-2 rounded-[9px] bg-[#b9b7ff] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-[#20264b] disabled:opacity-50"
-                          disabled={campaign.status !== "Draft" || campaign.setup < 100}
+                          disabled={campaign.status !== "draft" || campaign.setup < 100}
                         >
                           <Radio size={14} strokeWidth={2.1} aria-hidden="true" />
                           Activate

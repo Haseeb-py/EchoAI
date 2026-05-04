@@ -16,10 +16,13 @@ import {
 import { AdminHeader, AdminSidebar } from "@/components/admin/AdminNavigation";
 import { Button } from "@/components/ui/Button";
 import { Badge, Card, ProgressBar } from "@/components/ui/ui-components";
+import { apiGet, apiPost, apiPut } from "@/lib/api-client";
+import { getStoredAuthToken } from "@/lib/auth";
 
 const CAMPAIGN_DRAFT_KEY = "echoai_campaign_draft";
 
 type CampaignDraft = {
+  id?: string;
   name: string;
   product: string;
   audience: string;
@@ -32,6 +35,34 @@ type CampaignDraft = {
 };
 
 type PersonaColor = "primary" | "secondary" | "tertiary";
+
+type CampaignRecord = {
+  id: string;
+  name: string;
+  product: string;
+  audience: string;
+  goal?: string;
+  context?: string;
+  status: string;
+  script_id?: string | null;
+  persona_id?: string | null;
+};
+
+type ScriptRecord = {
+  id: string;
+  title: string;
+  summary: string;
+  content: string;
+  is_active: boolean;
+};
+
+type PersonaRecord = {
+  id: string;
+  name: string;
+  tone: string;
+  description: string;
+  is_active: boolean;
+};
 
 const personas: Array<{ name: string; tone: string; color: PersonaColor; posture: string }> = [
   {
@@ -64,6 +95,14 @@ const fallbackDraft: CampaignDraft = {
 
 const defaultScriptText =
   "Hi, this is EchoAI calling on behalf of your operations team. I noticed your support queue has been scaling quickly, and I wanted to understand where automation could reduce manual workload.\n\nIf the customer raises a price concern, validate the concern first, then offer a 90-day pilot instead of discounting immediately.\n\nThe goal is to qualify urgency, identify current pain points, and route high-intent leads into the follow-up workflow.";
+
+function formatStatus(status: string | undefined) {
+  if (!status) {
+    return "Draft";
+  }
+
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
 
 function FieldBlock({
   label,
@@ -133,6 +172,9 @@ function SectionHeader({
 
 export default function ScriptPersonaSetup() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [campaignId, setCampaignId] = useState<string | null>(null);
+  const [scriptId, setScriptId] = useState<string | null>(null);
+  const [personaId, setPersonaId] = useState<string | null>(null);
   const [campaignName, setCampaignName] = useState(fallbackDraft.name);
   const [productName, setProductName] = useState(fallbackDraft.product);
   const [campaignGoal, setCampaignGoal] = useState(fallbackDraft.goal);
@@ -141,7 +183,8 @@ export default function ScriptPersonaSetup() {
   const [scriptName, setScriptName] = useState("enterprise_outbound_v2.txt");
   const [scriptText, setScriptText] = useState(defaultScriptText);
   const [status, setStatus] = useState("Draft");
-  const [feedback, setFeedback] = useState("Campaign setup is editable. Changes stay in this browser until backend integration.");
+  const [feedback, setFeedback] = useState("Campaign setup is editable. Changes sync with the backend when you save.");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const storedDraft = localStorage.getItem(CAMPAIGN_DRAFT_KEY);
@@ -151,6 +194,7 @@ export default function ScriptPersonaSetup() {
 
     try {
       const parsed = JSON.parse(storedDraft) as Partial<CampaignDraft>;
+      setCampaignId(parsed.id || null);
       setCampaignName(parsed.name || fallbackDraft.name);
       setProductName(parsed.product || fallbackDraft.product);
       setCampaignGoal(parsed.goal || fallbackDraft.goal);
@@ -163,6 +207,56 @@ export default function ScriptPersonaSetup() {
       setFeedback("Saved draft could not be loaded, so M7 is using the default campaign setup.");
     }
   }, []);
+
+  useEffect(() => {
+    if (!campaignId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCampaign() {
+      try {
+        const token = getStoredAuthToken();
+        const campaign = await apiGet<CampaignRecord>(`/api/admin/campaigns/${campaignId}`, token);
+        if (cancelled) {
+          return;
+        }
+
+        setCampaignName(campaign.name || fallbackDraft.name);
+        setProductName(campaign.product || fallbackDraft.product);
+        setTargetSegment(campaign.audience || fallbackDraft.audience);
+        setCampaignGoal(campaign.goal || campaign.context || fallbackDraft.goal);
+        setStatus(formatStatus(campaign.status));
+        setScriptId(campaign.script_id || null);
+        setPersonaId(campaign.persona_id || null);
+
+        if (campaign.script_id) {
+          const script = await apiGet<ScriptRecord>(`/api/admin/scripts/${campaign.script_id}`, token);
+          if (!cancelled) {
+            setScriptName(script.title || scriptName);
+            setScriptText(script.content || scriptText);
+          }
+        }
+
+        if (campaign.persona_id) {
+          const persona = await apiGet<PersonaRecord>(`/api/admin/personas/${campaign.persona_id}`, token);
+          if (!cancelled) {
+            setSelectedPersona(persona.name || selectedPersona);
+          }
+        }
+      } catch (fetchError) {
+        if (!cancelled) {
+          setFeedback(fetchError instanceof Error ? fetchError.message : "Unable to load campaign from backend.");
+        }
+      }
+    }
+
+    loadCampaign();
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId]);
 
   const selectedPersonaConfig = personas.find((persona) => persona.name === selectedPersona) || personas[0];
   const hasScript = Boolean(scriptName.trim() && scriptText.trim());
@@ -189,10 +283,11 @@ export default function ScriptPersonaSetup() {
     [hasScript, scriptText]
   );
 
-  const saveDraft = (nextStatus = status) => {
+  const saveDraftLocal = (nextStatus = status) => {
     localStorage.setItem(
       CAMPAIGN_DRAFT_KEY,
       JSON.stringify({
+        id: campaignId || undefined,
         name: campaignName.trim() || fallbackDraft.name,
         product: productName.trim(),
         audience: targetSegment.trim(),
@@ -204,6 +299,108 @@ export default function ScriptPersonaSetup() {
         updatedAt: new Date().toISOString(),
       })
     );
+  };
+
+  const getPersonaSeed = () => personas.find((persona) => persona.name === selectedPersona) || personas[0];
+
+  const upsertScript = async (token: string | null) => {
+    if (!token) {
+      throw new Error("Authentication required.");
+    }
+
+    const summary = campaignGoal.trim() || scriptText.split("\n")[0] || "Campaign script";
+
+    if (scriptId) {
+      const updated = await apiPut<ScriptRecord>(
+        `/api/admin/scripts/${scriptId}`,
+        {
+          title: scriptName,
+          summary,
+          content: scriptText,
+          is_active: true,
+        },
+        token
+      );
+      return updated.id;
+    }
+
+    const created = await apiPost<ScriptRecord>(
+      "/api/admin/scripts",
+      {
+        title: scriptName,
+        summary,
+        content: scriptText,
+        is_active: true,
+      },
+      token
+    );
+    setScriptId(created.id);
+    return created.id;
+  };
+
+  const upsertPersona = async (token: string | null) => {
+    if (!token) {
+      throw new Error("Authentication required.");
+    }
+
+    const seed = getPersonaSeed();
+
+    if (personaId) {
+      const updated = await apiPut<PersonaRecord>(
+        `/api/admin/personas/${personaId}`,
+        {
+          name: seed.name,
+          tone: seed.tone,
+          description: seed.posture,
+          is_active: true,
+        },
+        token
+      );
+      return updated.id;
+    }
+
+    const created = await apiPost<PersonaRecord>(
+      "/api/admin/personas",
+      {
+        name: seed.name,
+        tone: seed.tone,
+        description: seed.posture,
+        is_active: true,
+      },
+      token
+    );
+    setPersonaId(created.id);
+    return created.id;
+  };
+
+  const updateCampaign = async (token: string | null, nextStatus: string) => {
+    if (!token) {
+      throw new Error("Authentication required.");
+    }
+    if (!campaignId) {
+      throw new Error("Campaign is missing. Create a campaign first.");
+    }
+
+    const scriptRef = await upsertScript(token);
+    const personaRef = await upsertPersona(token);
+
+    const updated = await apiPut<CampaignRecord>(
+      `/api/admin/campaigns/${campaignId}`,
+      {
+        name: campaignName.trim() || fallbackDraft.name,
+        product: productName.trim(),
+        audience: targetSegment.trim(),
+        goal: campaignGoal.trim(),
+        context: campaignGoal.trim(),
+        status: nextStatus.toLowerCase(),
+        script_id: scriptRef,
+        persona_id: personaRef,
+      },
+      token
+    );
+
+    setStatus(formatStatus(updated.status));
+    saveDraftLocal(formatStatus(updated.status));
   };
 
   const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
@@ -222,21 +419,40 @@ export default function ScriptPersonaSetup() {
     reader.readAsText(file);
   };
 
-  const moveToDraft = () => {
-    setStatus("Draft");
-    saveDraft("Draft");
-    setFeedback("Campaign moved to draft. You can safely continue editing setup details.");
+  const moveToDraft = async () => {
+    try {
+      setSaving(true);
+      const token = getStoredAuthToken();
+      await updateCampaign(token, "Draft");
+      setFeedback("Campaign moved to draft. You can safely continue editing setup details.");
+    } catch (saveError) {
+      setFeedback(saveError instanceof Error ? saveError.message : "Unable to save draft.");
+      saveDraftLocal("Draft");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const activateCampaign = () => {
+  const activateCampaign = async () => {
     if (!canActivate) {
       setFeedback("Activation is locked until script, persona, and campaign context are complete.");
       return;
     }
 
-    setStatus("Active");
-    saveDraft("Active");
-    setFeedback("Campaign activated locally. Backend activation can be connected in the next integration phase.");
+    try {
+      setSaving(true);
+      const token = getStoredAuthToken();
+      await updateCampaign(token, "Active");
+      if (campaignId) {
+        await apiPost<CampaignRecord>(`/api/admin/campaigns/${campaignId}/activate`, undefined, token);
+      }
+      setFeedback("Campaign activated and synced to the backend.");
+    } catch (saveError) {
+      setFeedback(saveError instanceof Error ? saveError.message : "Unable to activate campaign.");
+      saveDraftLocal("Active");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -282,7 +498,7 @@ export default function ScriptPersonaSetup() {
                 <Button
                   type="button"
                   size="md"
-                  disabled={!canActivate}
+                  disabled={!canActivate || saving}
                   onClick={activateCampaign}
                   className="!rounded-[10px] !bg-[#b9b7ff] !text-[13px] !font-semibold !tracking-[0.08em] !text-[#20264b]"
                   leftIcon={<Radio size={15} strokeWidth={2.2} aria-hidden="true" />}

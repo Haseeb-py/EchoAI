@@ -28,16 +28,17 @@ export interface AuthSuccessResponse {
   user: AuthUser;
 }
 
-interface BackendAuthResponse {
-  token?: string;
-  access_token?: string;
-  user: AuthUser;
-}
-
 export interface SignupSuccessResponse {
   success: boolean;
   message: string;
 }
+
+type BackendAuthResponse = {
+  token?: string;
+  access_token?: string;
+  token_type?: string;
+  user: AuthUser;
+};
 
 export const AUTH_TOKEN_KEY = "echoai_token";
 export const AUTH_USER_KEY = "echoai_user";
@@ -220,9 +221,14 @@ async function parseError(response: Response) {
   }
 }
 
-async function safePost<T>(url: string, payload: object): Promise<T | null> {
+function resolveApiUrl(path: string) {
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+  return `${base}${path}`;
+}
+
+async function safePost<T>(path: string, payload: object): Promise<T | null> {
   try {
-    const response = await fetch(url, {
+    const response = await fetch(resolveApiUrl(path), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -273,10 +279,13 @@ export async function loginWithPassword(
 }
 
 export async function signupWithPassword(payload: SignupPayload): Promise<SignupSuccessResponse> {
-  const apiResponse = await safePost<SignupSuccessResponse>("/api/auth/signup", payload);
+  const apiResponse = await safePost<AuthUser>("/api/auth/signup", payload);
 
   if (apiResponse) {
-    return apiResponse;
+    return {
+      success: true,
+      message: payload.role === "admin" ? "Admin account created successfully." : "Account created successfully.",
+    };
   }
 
   await wait(700);

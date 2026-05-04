@@ -5,7 +5,7 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
-from app.api.routes import auth, scripts, personas, campaigns, users
+from app.api.routes import auth, scripts, personas, campaigns, agent, users
 from app.models import campaign, persona, script, user  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
@@ -42,6 +42,7 @@ app.include_router(scripts.router, prefix="/api/admin", tags=["scripts"])
 app.include_router(personas.router, prefix="/api/admin", tags=["personas"])
 app.include_router(campaigns.router, prefix="/api/admin", tags=["campaigns"])
 app.include_router(users.router, prefix="/api/admin", tags=["users"])
+app.include_router(agent.router, prefix="/api", tags=["agent"])
 
 
 @app.get("/api/health")
