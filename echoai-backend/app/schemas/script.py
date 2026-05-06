@@ -4,14 +4,14 @@ from pydantic import BaseModel, Field
 class ScriptCreate(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     summary: str = Field(default="", max_length=400)
-    content: str = ""
+    content: str = Field(min_length=50)
     is_active: bool = True
 
 
 class ScriptUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=2, max_length=200)
     summary: str | None = Field(default=None, max_length=400)
-    content: str | None = None
+    content: str | None = Field(default=None, min_length=50)
     is_active: bool | None = None
 
 

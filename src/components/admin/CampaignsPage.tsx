@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, CheckCircle2, Clock3, Megaphone, Pencil, Radio, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock3, Megaphone, Pause, Pencil, Radio, SlidersHorizontal, Trash2 } from "lucide-react";
 import { AdminHeader, AdminSidebar } from "@/components/admin/AdminNavigation";
 import { Badge, Card, ProgressBar } from "@/components/ui/ui-components";
 import { apiDelete, apiGet, apiPost } from "@/lib/api-client";
@@ -172,6 +172,16 @@ export default function CampaignsPage() {
     }
   };
 
+  const pauseCampaign = async (campaignId: string) => {
+    try {
+      const token = getStoredAuthToken();
+      await apiPost(`/api/admin/campaigns/${campaignId}/pause`, undefined, token);
+      await loadCampaigns();
+    } catch (pauseError) {
+      setApiError(pauseError instanceof Error ? pauseError.message : "Unable to pause campaign.");
+    }
+  };
+
   const deleteCampaign = async (campaignId: string) => {
     const confirmed = window.confirm("Are you sure you want to delete this campaign? This cannot be undone.");
     if (!confirmed) {
@@ -281,15 +291,26 @@ export default function CampaignsPage() {
                           <SlidersHorizontal size={14} strokeWidth={2.1} aria-hidden="true" />
                           Open Setup
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => activateCampaign(campaign.id)}
-                          className="inline-flex h-8 items-center gap-2 rounded-[9px] bg-[#b9b7ff] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-[#20264b] disabled:opacity-50"
-                          disabled={campaign.status !== "draft" || campaign.setup < 100}
-                        >
-                          <Radio size={14} strokeWidth={2.1} aria-hidden="true" />
-                          Activate
-                        </button>
+                        {campaign.status === "active" ? (
+                          <button
+                            type="button"
+                            onClick={() => pauseCampaign(campaign.id)}
+                            className="inline-flex h-8 items-center gap-2 rounded-[9px] border border-white/12 bg-white/[0.03] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/82 hover:bg-white/[0.06]"
+                          >
+                            <Pause size={14} strokeWidth={2.1} aria-hidden="true" />
+                            Pause
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => activateCampaign(campaign.id)}
+                            className="inline-flex h-8 items-center gap-2 rounded-[9px] bg-[#b9b7ff] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-[#20264b] disabled:opacity-50"
+                            disabled={!(["draft", "paused"].includes(campaign.status)) || campaign.setup < 100}
+                          >
+                            <Radio size={14} strokeWidth={2.1} aria-hidden="true" />
+                            Activate
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}

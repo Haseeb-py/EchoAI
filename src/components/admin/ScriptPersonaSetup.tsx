@@ -93,6 +93,8 @@ const fallbackDraft: CampaignDraft = {
   status: "Draft",
 };
 
+const SCRIPT_MIN_LENGTH = 50;
+
 const defaultScriptText =
   "Hi, this is EchoAI calling on behalf of your operations team. I noticed your support queue has been scaling quickly, and I wanted to understand where automation could reduce manual workload.\n\nIf the customer raises a price concern, validate the concern first, then offer a 90-day pilot instead of discounting immediately.\n\nThe goal is to qualify urgency, identify current pain points, and route high-intent leads into the follow-up workflow.";
 
@@ -259,13 +261,15 @@ export default function ScriptPersonaSetup() {
   }, [campaignId]);
 
   const selectedPersonaConfig = personas.find((persona) => persona.name === selectedPersona) || personas[0];
-  const hasScript = Boolean(scriptName.trim() && scriptText.trim());
+  const scriptLength = scriptText.trim().length;
+  const scriptLengthReady = scriptLength >= SCRIPT_MIN_LENGTH;
+  const hasScript = Boolean(scriptName.trim() && scriptLengthReady);
   const hasPersona = Boolean(selectedPersona.trim());
   const hasContext = Boolean(productName.trim() && campaignGoal.trim() && targetSegment.trim());
   const canActivate = hasScript && hasPersona && hasContext;
 
   const readiness = [
-    { label: "Script assigned", value: hasScript ? scriptName : "Upload or write a script", done: hasScript },
+    { label: "Script assigned", value: hasScript ? scriptName : `Add at least ${SCRIPT_MIN_LENGTH} characters`, done: hasScript },
     { label: "Persona selected", value: hasPersona ? selectedPersona : "Select an AI persona", done: hasPersona },
     { label: "Campaign context", value: hasContext ? productName : "Complete product, goal, and audience", done: hasContext },
     { label: "Activation gate", value: canActivate ? "Ready for agent launch" : "Finish required setup first", done: canActivate },
@@ -306,6 +310,10 @@ export default function ScriptPersonaSetup() {
   const upsertScript = async (token: string | null) => {
     if (!token) {
       throw new Error("Authentication required.");
+    }
+
+    if (!scriptLengthReady) {
+      throw new Error(`Script content must be at least ${SCRIPT_MIN_LENGTH} characters.`);
     }
 
     const summary = campaignGoal.trim() || scriptText.split("\n")[0] || "Campaign script";
@@ -381,7 +389,7 @@ export default function ScriptPersonaSetup() {
       throw new Error("Campaign is missing. Create a campaign first.");
     }
 
-    const scriptRef = await upsertScript(token);
+    const scriptRef = hasScript ? await upsertScript(token) : null;
     const personaRef = await upsertPersona(token);
 
     const updated = await apiPut<CampaignRecord>(
@@ -413,8 +421,8 @@ export default function ScriptPersonaSetup() {
     const reader = new FileReader();
     reader.onload = () => {
       const fileText = typeof reader.result === "string" ? reader.result : "";
-      setScriptText(fileText || defaultScriptText);
-      setFeedback(`${file.name} loaded into the script editor.`);
+      setScriptText(fileText);
+      setFeedback(fileText.trim().length > 0 ? `${file.name} loaded into the script editor.` : "Uploaded script is empty. Add content before saving.");
     };
     reader.readAsText(file);
   };
@@ -529,6 +537,9 @@ export default function ScriptPersonaSetup() {
                     </>
                   }
                 />
+                <div className="mb-4 rounded-[12px] border border-[#f6c56f]/18 bg-[#2a2317] px-4 py-2 text-[12px] text-[#f6c56f]">
+                  Script content must be at least {SCRIPT_MIN_LENGTH} characters.
+                </div>
 
                 <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
                   <div className="rounded-[16px] border border-dashed border-[#8f92ff]/28 bg-[#171a28] p-5">
@@ -560,10 +571,15 @@ export default function ScriptPersonaSetup() {
                   <div className="rounded-[16px] border border-white/[0.06] bg-[#151824] p-5">
                     <div className="mb-4 flex items-center justify-between">
                       <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">Script Editor Preview</div>
-                      <Badge color={hasScript ? "success" : "neutral"} className="!text-[10px] !uppercase !tracking-[0.1em]">
-                        {hasScript ? "Editable" : "Empty"}
+                      <Badge color={hasScript ? "success" : scriptLength > 0 ? "tertiary" : "neutral"} className="!text-[10px] !uppercase !tracking-[0.1em]">
+                        {hasScript ? "Ready" : scriptLength > 0 ? "Too short" : "Empty"}
                       </Badge>
                     </div>
+                    {!hasScript && scriptLength > 0 ? (
+                      <div className="mb-3 rounded-[12px] border border-[#f6c56f]/20 bg-[#2a2317] px-3 py-2 text-[11px] text-[#f6c56f]">
+                        Script needs at least {SCRIPT_MIN_LENGTH} characters. Currently {scriptLength}.
+                      </div>
+                    ) : null}
                     <textarea
                       value={scriptText}
                       onChange={(event) => setScriptText(event.target.value)}
