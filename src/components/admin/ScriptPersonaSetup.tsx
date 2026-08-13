@@ -9,14 +9,16 @@ import {
   Gauge,
   Megaphone,
   PenLine,
+  Plus,
   Radio,
   ShieldCheck,
+  Trash2,
   UploadCloud,
 } from "lucide-react";
 import { AdminHeader, AdminSidebar } from "@/components/admin/AdminNavigation";
 import { Button } from "@/components/ui/Button";
 import { Badge, Card, ProgressBar } from "@/components/ui/ui-components";
-import { apiGet, apiPost, apiPut } from "@/lib/api-client";
+import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api-client";
 import { getStoredAuthToken } from "@/lib/auth";
 
 const CAMPAIGN_DRAFT_KEY = "echoai_campaign_draft";
@@ -97,6 +99,46 @@ const SCRIPT_MIN_LENGTH = 50;
 
 const defaultScriptText =
   "Hi, this is EchoAI calling on behalf of your operations team. I noticed your support queue has been scaling quickly, and I wanted to understand where automation could reduce manual workload.\n\nIf the customer raises a price concern, validate the concern first, then offer a 90-day pilot instead of discounting immediately.\n\nThe goal is to qualify urgency, identify current pain points, and route high-intent leads into the follow-up workflow.";
+
+type ScriptNodeType = "opening" | "discovery" | "pitch" | "objection" | "closing";
+
+type ScriptNode = {
+  id: string;
+  type: ScriptNodeType;
+  goal: string;
+  prompt: string;
+  next_node_ids: string[];
+};
+
+type ObjectionRecord = { id: string; node_id: string | null; category: string; trigger_terms: string[]; approved_response: string };
+
+const nodeTypes: ScriptNodeType[] = ["opening", "discovery", "pitch", "objection", "closing"];
+
+const defaultNodes: ScriptNode[] = [
+  { id: "opening", type: "opening", goal: "Introduce the call and request permission to continue.", prompt: "Introduce EchoAI clearly and ask whether this is a good time for a brief conversation.", next_node_ids: ["discovery"] },
+  { id: "discovery", type: "discovery", goal: "Understand the prospect's current process and pain points.", prompt: "Ask one concise question about the current support or sales workflow.", next_node_ids: ["pitch"] },
+  { id: "pitch", type: "pitch", goal: "Connect the product value to the need identified.", prompt: "Explain the relevant benefit using only approved campaign knowledge.", next_node_ids: ["closing"] },
+  { id: "closing", type: "closing", goal: "Confirm the agreed next action.", prompt: "Ask for the next step, such as a follow-up meeting or permission to send details.", next_node_ids: [] },
+];
+
+function parseNodes(content: string): ScriptNode[] | null {
+  try {
+    const parsed = JSON.parse(content) as { nodes?: ScriptNode[] } | ScriptNode[];
+    const nodes = Array.isArray(parsed) ? parsed : parsed.nodes;
+    if (!Array.isArray(nodes) || !nodes.every((node) => node.id && node.type && node.goal && node.prompt)) return null;
+    return nodes;
+  } catch {
+    return null;
+  }
+}
+
+function serializeNodes(nodes: ScriptNode[]) {
+  const orderedNodes = nodes.map((node, index) => ({
+    ...node,
+    next_node_ids: index < nodes.length - 1 ? [nodes[index + 1].id] : [],
+  }));
+  return JSON.stringify({ nodes: orderedNodes }, null, 2);
+}
 
 function formatStatus(status: string | undefined) {
   if (!status) {
@@ -184,9 +226,14 @@ export default function ScriptPersonaSetup() {
   const [selectedPersona, setSelectedPersona] = useState("Professional");
   const [scriptName, setScriptName] = useState("enterprise_outbound_v2.txt");
   const [scriptText, setScriptText] = useState(defaultScriptText);
+  const [nodes, setNodes] = useState<ScriptNode[]>(defaultNodes);
   const [status, setStatus] = useState("Draft");
   const [feedback, setFeedback] = useState("Campaign setup is editable. Changes sync with the backend when you save.");
   const [saving, setSaving] = useState(false);
+  const [objections, setObjections] = useState<ObjectionRecord[]>([]);
+  const [objectionCategory, setObjectionCategory] = useState("Price");
+  const [objectionTerms, setObjectionTerms] = useState("price, expensive");
+  const [objectionResponse, setObjectionResponse] = useState("");
 
   useEffect(() => {
     const storedDraft = localStorage.getItem(CAMPAIGN_DRAFT_KEY);
@@ -236,15 +283,18 @@ export default function ScriptPersonaSetup() {
         if (campaign.script_id) {
           const script = await apiGet<ScriptRecord>(`/api/admin/scripts/${campaign.script_id}`, token);
           if (!cancelled) {
-            setScriptName(script.title || scriptName);
-            setScriptText(script.content || scriptText);
+            setScriptName(script.title || "enterprise_outbound_v2.txt");
+            setScriptText(script.content || defaultScriptText);
+            setNodes(parseNodes(script.content) || defaultNodes);
+            const entries = await apiGet<ObjectionRecord[]>(`/api/admin/scripts/${campaign.script_id}/objections`, token);
+            if (!cancelled) setObjections(entries);
           }
         }
 
         if (campaign.persona_id) {
           const persona = await apiGet<PersonaRecord>(`/api/admin/personas/${campaign.persona_id}`, token);
           if (!cancelled) {
-            setSelectedPersona(persona.name || selectedPersona);
+            setSelectedPersona(persona.name || "Professional");
           }
         }
       } catch (fetchError) {
@@ -261,12 +311,16 @@ export default function ScriptPersonaSetup() {
   }, [campaignId]);
 
   const selectedPersonaConfig = personas.find((persona) => persona.name === selectedPersona) || personas[0];
-  const scriptLength = scriptText.trim().length;
-  const scriptLengthReady = scriptLength >= SCRIPT_MIN_LENGTH;
+  const scriptLength = serializeNodes(nodes).length;
+  const scriptLengthReady = nodes.length >= 2 && nodes.every((node) => node.id.trim() && node.goal.trim() && node.prompt.trim());
   const hasScript = Boolean(scriptName.trim() && scriptLengthReady);
   const hasPersona = Boolean(selectedPersona.trim());
   const hasContext = Boolean(productName.trim() && campaignGoal.trim() && targetSegment.trim());
   const canActivate = hasScript && hasPersona && hasContext;
+  const configurationLocked = ["Active", "Completed", "Archived"].includes(status);
+  const configurationLockMessage = status === "Active"
+    ? "This campaign is live. Pause it from Campaigns before changing its script, persona, objection guidance, or context."
+    : "This campaign is retained as read-only history. Create a new draft for a revised configuration.";
 
   const readiness = [
     { label: "Script assigned", value: hasScript ? scriptName : `Add at least ${SCRIPT_MIN_LENGTH} characters`, done: hasScript },
@@ -278,13 +332,8 @@ export default function ScriptPersonaSetup() {
   const readinessScore = Math.round((readiness.filter((item) => item.done).length / readiness.length) * 100);
 
   const scriptSections = useMemo(
-    () => [
-      { title: "Opening", status: hasScript ? "Ready" : "Missing", progress: hasScript ? 100 : 20 },
-      { title: "Discovery", status: hasScript ? "Ready" : "Missing", progress: hasScript ? 88 : 20 },
-      { title: "Price Objection", status: scriptText.toLowerCase().includes("price") ? "Counter-script" : "Needs copy", progress: scriptText.toLowerCase().includes("price") ? 74 : 38 },
-      { title: "Trust Objection", status: scriptText.toLowerCase().includes("trust") ? "Ready" : "Needs review", progress: scriptText.toLowerCase().includes("trust") ? 82 : 52 },
-    ],
-    [hasScript, scriptText]
+    () => nodes.map((node) => ({ title: node.type, status: node.prompt.trim() ? "Ready" : "Missing", progress: node.prompt.trim() ? 100 : 20 })),
+    [nodes]
   );
 
   const saveDraftLocal = (nextStatus = status) => {
@@ -307,6 +356,58 @@ export default function ScriptPersonaSetup() {
 
   const getPersonaSeed = () => personas.find((persona) => persona.name === selectedPersona) || personas[0];
 
+  const updateNode = (index: number, field: keyof ScriptNode, value: string) => {
+    setNodes((current) => current.map((node, nodeIndex) => {
+      if (nodeIndex !== index) return node;
+      if (field === "type") return { ...node, type: value as ScriptNodeType };
+      return { ...node, [field]: value };
+    }));
+  };
+
+  const addNode = () => {
+    const id = `node_${nodes.length + 1}`;
+    setNodes((current) => [...current, { id, type: "objection", goal: "Handle a likely objection.", prompt: "Acknowledge the concern, use approved knowledge, and ask one clarifying question.", next_node_ids: [] }]);
+  };
+
+  const addObjection = async () => {
+    if (configurationLocked) {
+      setFeedback(configurationLockMessage);
+      return;
+    }
+    if (!scriptId || !objectionCategory.trim() || !objectionResponse.trim()) {
+      setFeedback("Save the script first, then enter an objection category and approved response.");
+      return;
+    }
+    try {
+      const created = await apiPost<ObjectionRecord>(`/api/admin/scripts/${scriptId}/objections`, {
+        node_id: nodes.find((node) => node.type === "objection")?.id || null,
+        category: objectionCategory.trim(),
+        trigger_terms: objectionTerms.split(",").map((term) => term.trim()).filter(Boolean),
+        approved_response: objectionResponse.trim(),
+      }, getStoredAuthToken());
+      setObjections((current) => [created, ...current]);
+      setObjectionResponse("");
+      setFeedback(`${created.category} objection guidance saved for live calls.`);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Unable to save objection guidance.");
+    }
+  };
+
+  const deleteObjection = async (entry: ObjectionRecord) => {
+    if (configurationLocked || !scriptId) return;
+    try {
+      await apiDelete(`/api/admin/scripts/${scriptId}/objections/${entry.id}`, getStoredAuthToken());
+      setObjections((current) => current.filter((item) => item.id !== entry.id));
+      setFeedback(`${entry.category} objection guidance removed.`);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Unable to remove objection guidance.");
+    }
+  };
+
+  const removeNode = (index: number) => {
+    setNodes((current) => current.filter((_, nodeIndex) => nodeIndex !== index));
+  };
+
   const upsertScript = async (token: string | null) => {
     if (!token) {
       throw new Error("Authentication required.");
@@ -316,7 +417,7 @@ export default function ScriptPersonaSetup() {
       throw new Error(`Script content must be at least ${SCRIPT_MIN_LENGTH} characters.`);
     }
 
-    const summary = campaignGoal.trim() || scriptText.split("\n")[0] || "Campaign script";
+    const summary = campaignGoal.trim() || nodes[0]?.goal || "Campaign script";
 
     if (scriptId) {
       const updated = await apiPut<ScriptRecord>(
@@ -324,7 +425,7 @@ export default function ScriptPersonaSetup() {
         {
           title: scriptName,
           summary,
-          content: scriptText,
+          content: serializeNodes(nodes),
           is_active: true,
         },
         token
@@ -337,7 +438,7 @@ export default function ScriptPersonaSetup() {
       {
         title: scriptName,
         summary,
-        content: scriptText,
+        content: serializeNodes(nodes),
         is_active: true,
       },
       token
@@ -381,7 +482,7 @@ export default function ScriptPersonaSetup() {
     return created.id;
   };
 
-  const updateCampaign = async (token: string | null, nextStatus: string) => {
+  const updateCampaign = async (token: string | null) => {
     if (!token) {
       throw new Error("Authentication required.");
     }
@@ -400,7 +501,6 @@ export default function ScriptPersonaSetup() {
         audience: targetSegment.trim(),
         goal: campaignGoal.trim(),
         context: campaignGoal.trim(),
-        status: nextStatus.toLowerCase(),
         script_id: scriptRef,
         persona_id: personaRef,
       },
@@ -412,6 +512,10 @@ export default function ScriptPersonaSetup() {
   };
 
   const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    if (configurationLocked) {
+      setFeedback(configurationLockMessage);
+      return;
+    }
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -422,26 +526,36 @@ export default function ScriptPersonaSetup() {
     reader.onload = () => {
       const fileText = typeof reader.result === "string" ? reader.result : "";
       setScriptText(fileText);
+      const uploadedNodes = parseNodes(fileText);
+      if (uploadedNodes) setNodes(uploadedNodes);
       setFeedback(fileText.trim().length > 0 ? `${file.name} loaded into the script editor.` : "Uploaded script is empty. Add content before saving.");
     };
     reader.readAsText(file);
   };
 
   const moveToDraft = async () => {
+    if (configurationLocked) {
+      setFeedback(configurationLockMessage);
+      return;
+    }
     try {
       setSaving(true);
       const token = getStoredAuthToken();
-      await updateCampaign(token, "Draft");
-      setFeedback("Campaign moved to draft. You can safely continue editing setup details.");
+      await updateCampaign(token);
+      setFeedback("Campaign setup saved. You can safely continue editing node details.");
     } catch (saveError) {
       setFeedback(saveError instanceof Error ? saveError.message : "Unable to save draft.");
-      saveDraftLocal("Draft");
+      saveDraftLocal();
     } finally {
       setSaving(false);
     }
   };
 
   const activateCampaign = async () => {
+    if (configurationLocked) {
+      setFeedback(configurationLockMessage);
+      return;
+    }
     if (!canActivate) {
       setFeedback("Activation is locked until script, persona, and campaign context are complete.");
       return;
@@ -450,14 +564,14 @@ export default function ScriptPersonaSetup() {
     try {
       setSaving(true);
       const token = getStoredAuthToken();
-      await updateCampaign(token, "Active");
+      await updateCampaign(token);
       if (campaignId) {
         await apiPost<CampaignRecord>(`/api/admin/campaigns/${campaignId}/activate`, undefined, token);
       }
       setFeedback("Campaign activated and synced to the backend.");
     } catch (saveError) {
       setFeedback(saveError instanceof Error ? saveError.message : "Unable to activate campaign.");
-      saveDraftLocal("Active");
+      saveDraftLocal();
     } finally {
       setSaving(false);
     }
@@ -491,6 +605,7 @@ export default function ScriptPersonaSetup() {
                 <p className="mt-3 max-w-[720px] rounded-[12px] border border-white/[0.06] bg-white/[0.025] px-4 py-3 text-[12px] leading-5 text-white/54" aria-live="polite">
                   {feedback}
                 </p>
+                {configurationLocked ? <p className="mt-3 max-w-[720px] rounded-[12px] border border-[#f6c56f]/18 bg-[#2a2317] px-4 py-3 text-[12px] leading-5 text-[#f8dc9b]">{configurationLockMessage}</p> : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -499,6 +614,7 @@ export default function ScriptPersonaSetup() {
                   variant="outlined"
                   size="md"
                   onClick={moveToDraft}
+                  disabled={configurationLocked || saving}
                   className="!rounded-[10px] !border-white/15 !bg-white/[0.03] !text-[13px] !font-semibold !tracking-[0.08em]"
                 >
                   Move to Draft
@@ -506,7 +622,7 @@ export default function ScriptPersonaSetup() {
                 <Button
                   type="button"
                   size="md"
-                  disabled={!canActivate || saving}
+                  disabled={!canActivate || saving || configurationLocked}
                   onClick={activateCampaign}
                   className="!rounded-[10px] !bg-[#b9b7ff] !text-[13px] !font-semibold !tracking-[0.08em] !text-[#20264b]"
                   leftIcon={<Radio size={15} strokeWidth={2.2} aria-hidden="true" />}
@@ -516,6 +632,7 @@ export default function ScriptPersonaSetup() {
               </div>
             </div>
 
+            <fieldset disabled={configurationLocked} className="min-w-0 disabled:opacity-60">
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.16fr_0.84fr]">
               <Card className="!rounded-[18px] !border-white/[0.06] !bg-[#111420] !p-5">
                 <SectionHeader
@@ -550,7 +667,7 @@ export default function ScriptPersonaSetup() {
                       <div>
                         <div className="break-all text-[16px] font-semibold text-white">{scriptName || "No script selected"}</div>
                         <div className="mt-1 text-[11px] uppercase tracking-[0.13em] text-white/38">
-                          Text script / {scriptSections.length} sections
+                          Ordered node flow / {scriptSections.length} nodes
                         </div>
                       </div>
                     </div>
@@ -580,15 +697,42 @@ export default function ScriptPersonaSetup() {
                         Script needs at least {SCRIPT_MIN_LENGTH} characters. Currently {scriptLength}.
                       </div>
                     ) : null}
-                    <textarea
-                      value={scriptText}
-                      onChange={(event) => setScriptText(event.target.value)}
-                      rows={12}
-                      className="min-h-[260px] w-full resize-none rounded-[14px] border border-white/[0.06] bg-[#111420] p-4 text-[13px] leading-6 text-white/76 outline-none transition-colors placeholder:text-white/28 focus:border-[#b9b7ff]/36"
-                      placeholder="Write or upload the call script here..."
-                    />
+                    <div className="max-h-[430px] space-y-3 overflow-y-auto pr-1">
+                      {nodes.map((node, index) => (
+                        <div key={`${node.id}-${index}`} className="rounded-[14px] border border-white/[0.06] bg-[#111420] p-3">
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/42">Node {index + 1}</span>
+                            <button type="button" onClick={() => removeNode(index)} disabled={nodes.length <= 2} className="text-white/40 hover:text-red-200 disabled:opacity-30" aria-label={`Remove node ${index + 1}`}>
+                              <Trash2 size={14} strokeWidth={2.1} aria-hidden="true" />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input value={node.id} onChange={(event) => updateNode(index, "id", event.target.value)} aria-label={`Node ${index + 1} identifier`} className="rounded-[9px] border border-white/[0.08] bg-[#151824] px-2.5 py-2 text-[11px] text-white outline-none focus:border-[#b9b7ff]/36" />
+                            <select value={node.type} onChange={(event) => updateNode(index, "type", event.target.value)} aria-label={`Node ${index + 1} type`} className="rounded-[9px] border border-white/[0.08] bg-[#151824] px-2.5 py-2 text-[11px] text-white outline-none focus:border-[#b9b7ff]/36">
+                              {nodeTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                            </select>
+                          </div>
+                          <input value={node.goal} onChange={(event) => updateNode(index, "goal", event.target.value)} aria-label={`Node ${index + 1} goal`} placeholder="Node goal" className="mt-2 w-full rounded-[9px] border border-white/[0.08] bg-[#151824] px-2.5 py-2 text-[11px] text-white outline-none focus:border-[#b9b7ff]/36" />
+                          <textarea value={node.prompt} onChange={(event) => updateNode(index, "prompt", event.target.value)} aria-label={`Node ${index + 1} prompt`} placeholder="LLM instruction for this node" rows={3} className="mt-2 w-full resize-none rounded-[9px] border border-white/[0.08] bg-[#151824] px-2.5 py-2 text-[11px] leading-5 text-white outline-none focus:border-[#b9b7ff]/36" />
+                        </div>
+                      ))}
+                    </div>
+                    <Button type="button" variant="outlined" size="sm" onClick={addNode} className="mt-3 !h-9 !w-full !rounded-[10px] !text-[10px] !uppercase !tracking-[0.12em]" leftIcon={<Plus size={14} strokeWidth={2.1} aria-hidden="true" />}>
+                      Add Script Node
+                    </Button>
                   </div>
                 </div>
+              </Card>
+
+              <Card className="!rounded-[18px] !border-white/[0.06] !bg-[#111420] !p-5">
+                <SectionHeader icon={<ShieldCheck size={18} strokeWidth={2.1} aria-hidden="true" />} eyebrow="Grounding" title="Approved objection responses" />
+                <div className="grid gap-2 md:grid-cols-2">
+                  <input value={objectionCategory} onChange={(event) => setObjectionCategory(event.target.value)} placeholder="Category, e.g. Price" className="rounded-[10px] border border-white/[0.08] bg-[#191c28] px-3 py-2.5 text-[12px] text-white outline-none" />
+                  <input value={objectionTerms} onChange={(event) => setObjectionTerms(event.target.value)} placeholder="Trigger terms, comma separated" className="rounded-[10px] border border-white/[0.08] bg-[#191c28] px-3 py-2.5 text-[12px] text-white outline-none" />
+                </div>
+                <textarea value={objectionResponse} onChange={(event) => setObjectionResponse(event.target.value)} rows={3} placeholder="Approved factual response the LLM may use" className="mt-2 w-full resize-none rounded-[10px] border border-white/[0.08] bg-[#191c28] px-3 py-2.5 text-[12px] leading-5 text-white outline-none" />
+                <Button type="button" variant="outlined" size="sm" onClick={addObjection} className="mt-2 !h-9 !rounded-[10px] !text-[10px] !uppercase !tracking-[0.12em]">Save objection guidance</Button>
+                <div className="mt-4 space-y-2">{objections.map((entry) => <div key={entry.id} className="rounded-[11px] border border-white/[0.06] bg-white/[0.02] p-3"><div className="flex items-start justify-between gap-3"><div className="text-[12px] font-semibold text-white">{entry.category}</div>{!configurationLocked ? <button type="button" onClick={() => void deleteObjection(entry)} className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#f8b4b4] hover:text-[#fecaca]">Remove</button> : null}</div><div className="mt-1 text-[11px] text-white/48">{entry.trigger_terms.join(", ") || "No trigger terms"}</div><div className="mt-2 text-[12px] leading-5 text-white/68">{entry.approved_response}</div></div>)}{!objections.length ? <div className="text-[12px] text-white/44">No approved objection guidance saved yet.</div> : null}</div>
               </Card>
 
               <Card className="!rounded-[18px] !border-white/[0.06] !bg-[#111420] !p-5">
@@ -745,6 +889,7 @@ export default function ScriptPersonaSetup() {
                 </div>
               </Card>
             </div>
+            </fieldset>
           </section>
         </main>
       </div>

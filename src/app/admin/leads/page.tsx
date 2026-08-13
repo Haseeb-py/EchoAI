@@ -1,5 +1,5 @@
-import LeadsCrmPage from "@/components/admin/LeadsCrmPage";
+import { PersistedLeadsPage } from "@/components/admin/PersistedOperationsPages";
 
 export default function AdminLeadsRoute() {
-  return <LeadsCrmPage />;
+  return <PersistedLeadsPage />;
 }

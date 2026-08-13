@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr
 
 
@@ -16,16 +18,16 @@ class UserAdminCreate(BaseModel):
     name: str
     email: EmailStr
     password: str
-    role: str = "agent"
-    status: str = "active"
+    role: Literal["agent", "supervisor", "admin"] = "agent"
+    status: Literal["active", "inactive", "locked"] = "active"
 
 
 class UserAdminUpdate(BaseModel):
     name: str | None = None
     email: EmailStr | None = None
     password: str | None = None
-    role: str | None = None
-    status: str | None = None
+    role: Literal["agent", "supervisor", "admin"] | None = None
+    status: Literal["active", "inactive", "locked"] | None = None
 
 
 class PasswordResetResponse(BaseModel):

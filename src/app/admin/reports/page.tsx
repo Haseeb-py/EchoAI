@@ -1,5 +1,5 @@
-import ReportsExportsPage from "@/components/admin/ReportsExportsPage";
+import PersistedReportsPage from "@/components/admin/PersistedReportsPage";
 
 export default function AdminReportsRoute() {
-  return <ReportsExportsPage />;
+  return <PersistedReportsPage />;
 }

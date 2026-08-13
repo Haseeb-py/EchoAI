@@ -36,16 +36,16 @@ end fork
 
 :System computes readiness score\n(script + persona + context completeness);
 
-while (Readiness score == 100%?) is (No)
+if (Readiness score == 100%?) then (No)
   :Activate button remains disabled;
   :Admin fills remaining required fields;
-  :System computes readiness score\n(script + persona + context completeness);
-endwhile (Yes)
-
-:Activate button becomes enabled;
-:Admin clicks "Activate Campaign";
-:POST /api/admin/campaigns/{id}/activate;
-:Campaign status: draft → active;
-:Campaign available for agent use;
-stop
+  goto :System computes readiness score\n(script + persona + context completeness);
+else (Yes)
+  :Activate button becomes enabled;
+  :Admin clicks "Activate Campaign";
+  :POST /api/admin/campaigns/{id}/activate;
+  :Campaign status: draft → active;
+  :Campaign available for agent use;
+  stop
+endif
 @enduml

@@ -157,7 +157,7 @@ export default function UserManagementPage() {
       setUsers((currentUsers) => [mapBackendUser(created), ...currentUsers]);
       setNewUser({ name: "", email: "", role: "Agent", password: "" });
       setMessage(`${created.name} has been added as an ${roleLabel}. Login is now enabled.`);
-    } catch (error) {
+    } catch {
       setMessage("Unable to create user. Please confirm the backend is running and try again.");
     }
   }

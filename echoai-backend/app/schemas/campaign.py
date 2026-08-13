@@ -1,4 +1,9 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
+
+
+CAMPAIGN_STATUSES = {"draft", "active", "paused", "completed", "archived"}
 
 
 class CampaignCreate(BaseModel):
@@ -31,8 +36,13 @@ class CampaignOut(BaseModel):
     goal: str
     script_id: str | None
     persona_id: str | None
+    script_snapshot_json: str = "{}"
+    persona_snapshot_json: str = "{}"
     context: str
     status: str
+    activated_at: datetime | None = None
+    completed_at: datetime | None = None
+    archived_at: datetime | None = None
 
     class Config:
         from_attributes = True

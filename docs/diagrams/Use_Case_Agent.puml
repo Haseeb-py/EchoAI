@@ -1,0 +1,83 @@
+@startuml EchoAI_UseCase_Agent
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #EAF0FB
+  BorderColor #3A6BC9
+  FontName Arial
+  FontSize 12
+}
+skinparam actor {
+  BackgroundColor #DBEAFE
+  BorderColor #1D4ED8
+  FontName Arial
+  FontSize 13
+}
+skinparam ArrowColor #1D4ED8
+skinparam ArrowFontName Arial
+skinparam ArrowFontSize 11
+
+actor Agent as A
+
+rectangle "EchoAI — Agent Portal" {
+
+  usecase "Login" as LOGIN
+  usecase "Validate Credentials" as VALIDATE
+  usecase "View Dashboard" as DASH
+  usecase "View Performance Metrics" as METRICS
+  usecase "Manage Active Call" as CALL
+  usecase "Start Call Session" as START
+  usecase "End Call and Log Disposition" as END
+  usecase "View Script Prompter" as SCRIPT
+  usecase "Highlight Script Section" as HIGHLIGHT
+  usecase "View AI Suggestion Feed" as AI
+  usecase "Accept AI Suggestion" as ACCEPT
+  usecase "View Lead Queue" as LEADS
+  usecase "Select Lead for Call" as SELECT
+  usecase "View Lead Details" as DETAIL
+  usecase "View Campaign Information" as CAMPAIGN
+  usecase "Trigger Escalation to Supervisor" as ESCALATE
+
+}
+
+' Associations (Actor to primary use cases)
+A --> LOGIN
+A --> DASH
+A --> CALL
+A --> SCRIPT
+A --> AI
+A --> LEADS
+A --> CAMPAIGN
+A --> ESCALATE
+
+' Login includes credential validation (always happens)
+LOGIN ..> VALIDATE : <<include>>
+
+' Dashboard always shows metrics
+DASH ..> METRICS : <<include>>
+
+' Manage Call always includes start and end steps
+CALL ..> START : <<include>>
+CALL ..> END : <<include>>
+
+' Script Prompter extends Manage Call (used only during an active call)
+SCRIPT ..> CALL : <<extend>>
+
+' Highlighting a section is always done within Script Prompter
+SCRIPT ..> HIGHLIGHT : <<include>>
+
+' AI Suggestion Feed extends Manage Call (optional real-time guidance)
+AI ..> CALL : <<extend>>
+
+' Accepting a suggestion is part of using the AI Feed
+AI ..> ACCEPT : <<include>>
+
+' Lead selection and detail view are steps inside viewing the queue
+LEADS ..> SELECT : <<include>>
+SELECT ..> DETAIL : <<include>>
+
+' Escalation is only triggered during a difficult active call (conditional)
+ESCALATE ..> CALL : <<extend>>
+
+@enduml

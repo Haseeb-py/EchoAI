@@ -2,10 +2,10 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, CheckCircle2, Clock3, Megaphone, Pause, Pencil, Radio, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArrowRight, CheckCircle2, Clock3, Megaphone, Pause, Pencil, Radio, SlidersHorizontal } from "lucide-react";
 import { AdminHeader, AdminSidebar } from "@/components/admin/AdminNavigation";
 import { Badge, Card, ProgressBar } from "@/components/ui/ui-components";
-import { apiDelete, apiGet, apiPost } from "@/lib/api-client";
+import { apiGet, apiPost } from "@/lib/api-client";
 import { getStoredAuthToken } from "@/lib/auth";
 
 const CAMPAIGN_DRAFT_KEY = "echoai_campaign_draft";
@@ -142,6 +142,14 @@ export default function CampaignsPage() {
   };
 
   const openExistingCampaign = (campaign: CampaignRecord) => {
+    if (campaign.status === "active") {
+      setApiError("Pause this active campaign before changing its script, persona, or prompt configuration.");
+      return;
+    }
+    if (["completed", "archived"].includes(campaign.status)) {
+      setApiError("Completed and archived campaigns are read-only history. Create a new draft to run a revised configuration.");
+      return;
+    }
     localStorage.setItem(
       CAMPAIGN_DRAFT_KEY,
       JSON.stringify({
@@ -158,8 +166,16 @@ export default function CampaignsPage() {
     router.push("/admin/setup");
   };
 
-  const openEditCampaign = (campaignId: string) => {
-    router.push(`/admin/campaigns/${campaignId}/edit`);
+  const openEditCampaign = (campaign: CampaignRecord) => {
+    if (campaign.status === "active") {
+      setApiError("Pause this active campaign before editing its configuration.");
+      return;
+    }
+    if (["completed", "archived"].includes(campaign.status)) {
+      setApiError("Completed and archived campaigns are retained as read-only history.");
+      return;
+    }
+    router.push(`/admin/campaigns/${campaign.id}/edit`);
   };
 
   const activateCampaign = async (campaignId: string) => {
@@ -182,18 +198,29 @@ export default function CampaignsPage() {
     }
   };
 
-  const deleteCampaign = async (campaignId: string) => {
-    const confirmed = window.confirm("Are you sure you want to delete this campaign? This cannot be undone.");
+  const completeCampaign = async (campaignId: string) => {
+    const confirmed = window.confirm("Complete this campaign? Its history will remain available to administrators.");
     if (!confirmed) {
       return;
     }
 
     try {
       const token = getStoredAuthToken();
-      await apiDelete(`/api/admin/campaigns/${campaignId}`, token);
+      await apiPost(`/api/admin/campaigns/${campaignId}/complete`, undefined, token);
       await loadCampaigns();
-    } catch (deleteError) {
-      setApiError(deleteError instanceof Error ? deleteError.message : "Unable to delete campaign.");
+    } catch (completeError) {
+      setApiError(completeError instanceof Error ? completeError.message : "Unable to complete campaign.");
+    }
+  };
+
+  const archiveCampaign = async (campaignId: string) => {
+    const confirmed = window.confirm("Archive this completed campaign? It will remain available as read-only history.");
+    if (!confirmed) return;
+    try {
+      await apiPost(`/api/admin/campaigns/${campaignId}/archive`, undefined, getStoredAuthToken());
+      await loadCampaigns();
+    } catch (archiveError) {
+      setApiError(archiveError instanceof Error ? archiveError.message : "Unable to archive campaign.");
     }
   };
 
@@ -256,11 +283,8 @@ export default function CampaignsPage() {
                           </p>
                         </div>
                         <div className="flex gap-2">
-                          <button type="button" onClick={() => openEditCampaign(campaign.id)} className="grid h-9 w-9 place-items-center rounded-[10px] border border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.06]" aria-label="Edit campaign">
+                          <button type="button" onClick={() => openEditCampaign(campaign)} className="grid h-9 w-9 place-items-center rounded-[10px] border border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.06]" aria-label="Edit campaign">
                             <Pencil size={14} strokeWidth={2.1} aria-hidden="true" />
-                          </button>
-                          <button type="button" onClick={() => deleteCampaign(campaign.id)} className="grid h-9 w-9 place-items-center rounded-[10px] border border-red-400/30 bg-red-500/10 text-red-100 hover:bg-red-500/20" aria-label="Delete campaign">
-                            <Trash2 size={14} strokeWidth={2.1} aria-hidden="true" />
                           </button>
                         </div>
                       </div>
@@ -282,6 +306,9 @@ export default function CampaignsPage() {
 
                       <ProgressBar value={campaign.setup} color={campaign.setup > 80 ? "primary" : "tertiary"} className="mt-3" />
 
+                      {campaign.status === "active" ? <p className="mt-3 text-[11px] text-[#f8dc9b]">Pause before editing live script, persona, knowledge, or campaign configuration.</p> : null}
+                      {["completed", "archived"].includes(campaign.status) ? <p className="mt-3 text-[11px] text-white/46">This campaign is retained as read-only history.</p> : null}
+
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
@@ -300,7 +327,7 @@ export default function CampaignsPage() {
                             <Pause size={14} strokeWidth={2.1} aria-hidden="true" />
                             Pause
                           </button>
-                        ) : (
+                        ) : ["draft", "paused"].includes(campaign.status) ? (
                           <button
                             type="button"
                             onClick={() => activateCampaign(campaign.id)}
@@ -310,7 +337,18 @@ export default function CampaignsPage() {
                             <Radio size={14} strokeWidth={2.1} aria-hidden="true" />
                             Activate
                           </button>
-                        )}
+                        ) : null}
+                        {(["active", "paused"] as string[]).includes(campaign.status) ? (
+                          <button type="button" onClick={() => completeCampaign(campaign.id)} className="inline-flex h-8 items-center gap-2 rounded-[9px] border border-[#f6c56f]/25 bg-[#f6c56f]/10 px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-[#f8dc9b] hover:bg-[#f6c56f]/16">
+                            Complete
+                          </button>
+                        ) : null}
+                        {campaign.status === "completed" ? (
+                          <button type="button" onClick={() => archiveCampaign(campaign.id)} className="inline-flex h-8 items-center gap-2 rounded-[9px] border border-white/12 bg-white/[0.03] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/82 hover:bg-white/[0.06]">
+                            <Archive size={14} strokeWidth={2.1} aria-hidden="true" />
+                            Archive
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   ))}

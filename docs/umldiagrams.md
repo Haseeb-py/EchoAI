@@ -915,6 +915,320 @@ end note
 
 ---
 
+## FIGURE 3.14 — Use Case Diagram: Agent Role
+**Where:** Chapter 3, Section 3.4.1.5 (Use Case Diagrams)
+**Type:** Use Case Diagram
+
+```plantuml
+@startuml EchoAI_UseCase_Agent
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #EAF0FB
+  BorderColor #3A6BC9
+  FontName Arial
+  FontSize 12
+}
+skinparam actor {
+  BackgroundColor #DBEAFE
+  BorderColor #1D4ED8
+  FontName Arial
+  FontSize 13
+}
+skinparam ArrowColor #1D4ED8
+skinparam ArrowFontName Arial
+skinparam ArrowFontSize 11
+
+actor Agent as A
+
+rectangle "EchoAI — Agent Portal" {
+
+  usecase "Login" as LOGIN
+  usecase "Validate Credentials" as VALIDATE
+  usecase "View Dashboard" as DASH
+  usecase "View Performance Metrics" as METRICS
+  usecase "Manage Active Call" as CALL
+  usecase "Start Call Session" as START
+  usecase "End Call and Log Disposition" as END
+  usecase "View Script Prompter" as SCRIPT
+  usecase "Highlight Script Section" as HIGHLIGHT
+  usecase "View AI Suggestion Feed" as AI
+  usecase "Accept AI Suggestion" as ACCEPT
+  usecase "View Lead Queue" as LEADS
+  usecase "Select Lead for Call" as SELECT
+  usecase "View Lead Details" as DETAIL
+  usecase "View Campaign Information" as CAMPAIGN
+  usecase "Trigger Escalation to Supervisor" as ESCALATE
+
+}
+
+' Associations (Actor to primary use cases)
+A --> LOGIN
+A --> DASH
+A --> CALL
+A --> SCRIPT
+A --> AI
+A --> LEADS
+A --> CAMPAIGN
+A --> ESCALATE
+
+' Login includes credential validation (always happens)
+LOGIN ..> VALIDATE : <<include>>
+
+' Dashboard always shows metrics
+DASH ..> METRICS : <<include>>
+
+' Manage Call always includes start and end steps
+CALL ..> START : <<include>>
+CALL ..> END : <<include>>
+
+' Script Prompter extends Manage Call (used only during an active call)
+SCRIPT ..> CALL : <<extend>>
+
+' Highlighting a section is always done within Script Prompter
+SCRIPT ..> HIGHLIGHT : <<include>>
+
+' AI Suggestion Feed extends Manage Call (optional real-time guidance)
+AI ..> CALL : <<extend>>
+
+' Accepting a suggestion is part of using the AI Feed
+AI ..> ACCEPT : <<include>>
+
+' Lead selection and detail view are steps inside viewing the queue
+LEADS ..> SELECT : <<include>>
+SELECT ..> DETAIL : <<include>>
+
+' Escalation is only triggered during a difficult active call (conditional)
+ESCALATE ..> CALL : <<extend>>
+
+@enduml
+```
+
+---
+
+## FIGURE 3.15 — Use Case Diagram: Supervisor Role
+**Where:** Chapter 3, Section 3.4.1.5 (Use Case Diagrams)
+**Type:** Use Case Diagram
+
+```plantuml
+@startuml EchoAI_UseCase_Supervisor
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #ECFDF5
+  BorderColor #059669
+  FontName Arial
+  FontSize 12
+}
+skinparam actor {
+  BackgroundColor #D1FAE5
+  BorderColor #065F46
+  FontName Arial
+  FontSize 13
+}
+skinparam ArrowColor #059669
+skinparam ArrowFontName Arial
+skinparam ArrowFontSize 11
+
+actor Supervisor as S
+
+rectangle "EchoAI — Supervisor Portal" {
+
+  usecase "Login" as LOGIN
+  usecase "Validate Credentials" as VALIDATE
+  usecase "View Supervisor Dashboard" as DASH
+  usecase "View Team Performance Summary" as SUMMARY
+  usecase "Monitor Agent Cards" as MONITOR
+  usecase "View Agent Live Status" as STATUS
+  usecase "View Agent Active Call Details" as CALL_DETAIL
+  usecase "Handle Escalation Alert" as ESCALATE
+  usecase "Advise Agent (Whisper)" as ADVISE
+  usecase "Take Over Call" as TAKEOVER
+  usecase "View Analytics and Reports" as ANALYTICS
+  usecase "Filter Analytics by Date Range" as FILTER
+  usecase "Export Performance Report" as EXPORT
+  usecase "View Campaign Overview" as CAMPAIGN
+  usecase "View Script and Persona in Use" as SCRIPT_VIEW
+
+}
+
+' Associations (Supervisor to primary use cases)
+S --> LOGIN
+S --> DASH
+S --> MONITOR
+S --> ESCALATE
+S --> ANALYTICS
+S --> CAMPAIGN
+
+' Login always validates credentials
+LOGIN ..> VALIDATE : <<include>>
+
+' Dashboard always shows team performance summary
+DASH ..> SUMMARY : <<include>>
+
+' Monitoring agents includes seeing their live status
+MONITOR ..> STATUS : <<include>>
+
+' Viewing call details extends monitoring (only when agent is on a live call)
+CALL_DETAIL ..> MONITOR : <<extend>>
+
+' Handling an escalation always requires viewing call details first
+ESCALATE ..> CALL_DETAIL : <<include>>
+
+' Advise (whisper coaching) is one option when handling escalation
+ADVISE ..> ESCALATE : <<extend>>
+
+' Taking over the call is an optional stronger action during escalation
+TAKEOVER ..> ESCALATE : <<extend>>
+
+' Analytics always includes date range filtering
+ANALYTICS ..> FILTER : <<include>>
+
+' Exporting a report is optional (extends analytics)
+EXPORT ..> ANALYTICS : <<extend>>
+
+' Campaign view extends dashboard (optional drill-down)
+CAMPAIGN ..> DASH : <<extend>>
+
+' Viewing script/persona in use extends campaign overview
+SCRIPT_VIEW ..> CAMPAIGN : <<extend>>
+
+@enduml
+```
+
+---
+
+## FIGURE 3.16 — Use Case Diagram: Administrator Role
+**Where:** Chapter 3, Section 3.4.1.5 (Use Case Diagrams)
+**Type:** Use Case Diagram
+
+```plantuml
+@startuml EchoAI_UseCase_Admin
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #FFF7ED
+  BorderColor #EA580C
+  FontName Arial
+  FontSize 12
+}
+skinparam actor {
+  BackgroundColor #FFEDD5
+  BorderColor #9A3412
+  FontName Arial
+  FontSize 13
+}
+skinparam ArrowColor #EA580C
+skinparam ArrowFontName Arial
+skinparam ArrowFontSize 11
+
+actor Admin as ADM
+
+rectangle "EchoAI — Admin Portal" {
+
+  usecase "Login" as LOGIN
+  usecase "Validate Credentials" as VALIDATE
+
+  usecase "Manage Users" as USERS
+  usecase "Create User Account" as CREATE_USER
+  usecase "Hash Password (bcrypt)" as HASH
+  usecase "Lock User Account" as LOCK
+  usecase "Unlock User Account" as UNLOCK
+  usecase "Deactivate User Account" as DEACTIVATE
+  usecase "Reset User Password" as RESET_PW
+
+  usecase "Manage Campaigns" as CAMPAIGNS
+  usecase "Create Campaign Draft" as CREATE_CAMP
+  usecase "Activate Campaign" as ACTIVATE
+  usecase "Pause Campaign" as PAUSE
+
+  usecase "Manage Scripts" as SCRIPTS
+  usecase "Create Script" as CREATE_SCRIPT
+  usecase "Edit Script Content" as EDIT_SCRIPT
+  usecase "Activate Script" as ACTIVATE_SCRIPT
+
+  usecase "Manage Personas" as PERSONAS
+  usecase "Create Persona" as CREATE_PERSONA
+  usecase "Set Persona Tone" as SET_TONE
+
+  usecase "View Global Analytics" as ANALYTICS
+  usecase "Filter by Date Range" as FILTER
+
+  usecase "Manage Knowledge Base" as KB
+  usecase "Add Knowledge Item" as ADD_KB
+  usecase "Filter by Category" as KB_FILTER
+
+  usecase "View Security and Access Log" as SECURITY
+  usecase "View Authentication Events" as AUTH_LOG
+
+  usecase "Configure System Settings" as SETTINGS
+
+  usecase "View Admin Dashboard" as DASH
+  usecase "View System KPIs" as KPIS
+
+}
+
+' Associations (Admin to all top-level use cases)
+ADM --> LOGIN
+ADM --> DASH
+ADM --> USERS
+ADM --> CAMPAIGNS
+ADM --> SCRIPTS
+ADM --> PERSONAS
+ADM --> ANALYTICS
+ADM --> KB
+ADM --> SECURITY
+ADM --> SETTINGS
+
+' Login
+LOGIN ..> VALIDATE : <<include>>
+
+' Dashboard
+DASH ..> KPIS : <<include>>
+
+' ---- User Management ----
+' Creating a user always hashes the password
+USERS ..> CREATE_USER : <<include>>
+CREATE_USER ..> HASH : <<include>>
+
+' Lock, Unlock, Deactivate, Reset extend Manage Users (conditional actions per user row)
+LOCK ..> USERS : <<extend>>
+UNLOCK ..> USERS : <<extend>>
+DEACTIVATE ..> USERS : <<extend>>
+RESET_PW ..> USERS : <<extend>>
+
+' ---- Campaign Management ----
+CAMPAIGNS ..> CREATE_CAMP : <<include>>
+ACTIVATE ..> CAMPAIGNS : <<extend>>
+PAUSE ..> CAMPAIGNS : <<extend>>
+
+' ---- Script Management ----
+SCRIPTS ..> CREATE_SCRIPT : <<include>>
+EDIT_SCRIPT ..> SCRIPTS : <<extend>>
+ACTIVATE_SCRIPT ..> SCRIPTS : <<extend>>
+
+' ---- Persona Management ----
+PERSONAS ..> CREATE_PERSONA : <<include>>
+CREATE_PERSONA ..> SET_TONE : <<include>>
+
+' ---- Analytics ----
+ANALYTICS ..> FILTER : <<include>>
+
+' ---- Knowledge Base ----
+KB ..> ADD_KB : <<include>>
+KB_FILTER ..> KB : <<extend>>
+
+' ---- Security Log ----
+SECURITY ..> AUTH_LOG : <<include>>
+
+@enduml
+```
+
+---
+
 ## FIGURE 4.3 — Middleware RBAC Logic Flow Diagram
 **Where:** Chapter 4, Section 4.2.1.6 (after paragraph ending "...without a round-trip to the backend.")
 **Type:** Flowchart / Activity Diagram
@@ -1245,6 +1559,9 @@ echoai-backend/
 | 3.11 | State Diagram | PlantUML above |
 | 3.12 | ERD | PlantUML above |
 | 3.13 | Color/Typography Reference | Manual (Figma/Canva) |
+| 3.14 | Use Case (Agent) | PlantUML above |
+| 3.15 | Use Case (Supervisor) | PlantUML above |
+| 3.16 | Use Case (Administrator) | PlantUML above |
 | 4.1 | Code Tree Screenshot | Terminal: tree echoai-backend/app/ |
 | 4.2 | UI Screenshot | localhost:3000/login |
 | 4.3 | Flow Diagram | PlantUML above |

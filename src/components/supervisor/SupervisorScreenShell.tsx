@@ -1,6 +1,5 @@
 import { ReactNode } from "react";
 import { SupervisorHeader, SupervisorSidebar } from "@/components/supervisor/SupervisorNavigation";
-import { SupervisorLiveCallEngine } from "@/components/supervisor/live-calls";
 
 type SupervisorKey = "overview" | "activity" | "escalations" | "performance" | "campaigns" | "alerts" | "settings";
 
@@ -23,7 +22,6 @@ export function SupervisorScreenShell({
     <div className="min-h-screen overflow-x-hidden bg-[#080A13] text-white">
       <div className="flex min-h-screen bg-[radial-gradient(circle_at_24%_12%,rgba(118,107,255,0.14),transparent_34%),radial-gradient(circle_at_88%_20%,rgba(143,221,224,0.1),transparent_30%),#0D0F1A]">
         <SupervisorSidebar activeKey={activeKey} />
-        <SupervisorLiveCallEngine />
         <main className="flex-1">
           <SupervisorHeader contextLabel={contextLabel} activeKey={activeKey} />
           <section className="px-5 pb-8 pt-5 md:px-6">

@@ -23,12 +23,15 @@ import { AdminHeader, AdminSidebar } from "@/components/admin/AdminNavigation";
 import { AdminFormField, AdminMessage, AdminPanel, AdminSelectField, AdminStatCard } from "@/components/admin/AdminScreenShell";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/ui-components";
+import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api-client";
+import { getStoredAuthToken } from "@/lib/auth";
 
 type KnowledgeCategory = "Product Info" | "FAQ" | "Objection" | "Pricing" | "Policy";
 type KnowledgeStatus = "Draft" | "Published" | "Needs Review";
 
 type KnowledgeItem = {
-  id: number;
+  id: string;
+  campaignId: string | null;
   title: string;
   category: KnowledgeCategory;
   status: KnowledgeStatus;
@@ -39,46 +42,38 @@ type KnowledgeItem = {
 
 const categories: KnowledgeCategory[] = ["Product Info", "FAQ", "Objection", "Pricing", "Policy"];
 const statuses: KnowledgeStatus[] = ["Draft", "Published", "Needs Review"];
-const KNOWLEDGE_ITEMS_KEY = "echoai_knowledge_items";
+type KnowledgeApiRecord = {
+  id: string;
+  campaign_id: string | null;
+  title: string;
+  category: string;
+  content: string;
+  status: "draft" | "published" | "needs_review";
+  updated_at: string;
+};
 
-const initialKnowledgeItems: KnowledgeItem[] = [
-  {
-    id: 1,
-    title: "EchoAI Voice Automation Suite",
-    category: "Product Info",
-    status: "Published",
-    campaign: "Q2 BPO Modernization Sprint",
-    summary: "AI-managed outbound and support call automation for BPO teams handling high-volume conversations.",
-    updatedAt: "Today",
-  },
-  {
-    id: 2,
-    title: "90-day pilot pricing response",
-    category: "Pricing",
-    status: "Needs Review",
-    campaign: "Q3 Support Automation Pilot",
-    summary: "If pricing is challenged, validate the concern and position the 90-day pilot as a low-risk evaluation path.",
-    updatedAt: "Yesterday",
-  },
-  {
-    id: 3,
-    title: "Trust objection answer",
-    category: "Objection",
-    status: "Draft",
-    campaign: "Telecom Renewal Pilot",
-    summary: "Explain supervised AI handling, audit trails, and escalation controls before asking for a next-step meeting.",
-    updatedAt: "Apr 21, 2026",
-  },
-  {
-    id: 4,
-    title: "Data handling policy",
-    category: "Policy",
-    status: "Published",
-    campaign: "All Campaigns",
-    summary: "Customer call data is treated as confidential and should only be accessed by authorized users.",
-    updatedAt: "Apr 19, 2026",
-  },
-];
+type CampaignRecord = { id: string; name: string; status: string };
+
+function toUiStatus(status: KnowledgeApiRecord["status"]): KnowledgeStatus {
+  return status === "published" ? "Published" : status === "needs_review" ? "Needs Review" : "Draft";
+}
+
+function toApiStatus(status: KnowledgeStatus): KnowledgeApiRecord["status"] {
+  return status === "Published" ? "published" : status === "Needs Review" ? "needs_review" : "draft";
+}
+
+function toKnowledgeItem(record: KnowledgeApiRecord): KnowledgeItem {
+  return {
+    id: record.id,
+    campaignId: record.campaign_id,
+    title: record.title,
+    category: categories.includes(record.category as KnowledgeCategory) ? record.category as KnowledgeCategory : "FAQ",
+    status: toUiStatus(record.status),
+    campaign: record.campaign_id || "All Campaigns",
+    summary: record.content,
+    updatedAt: new Date(record.updated_at).toLocaleDateString(),
+  };
+}
 
 const categoryIcons = {
   "Product Info": <Package size={16} strokeWidth={2.1} aria-hidden="true" />,
@@ -89,15 +84,16 @@ const categoryIcons = {
 };
 
 export default function KnowledgeBasePage() {
-  const [items, setItems] = useState<KnowledgeItem[]>(initialKnowledgeItems);
+  const [items, setItems] = useState<KnowledgeItem[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignRecord[]>([]);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<KnowledgeCategory | "All">("All");
   const [statusFilter, setStatusFilter] = useState<KnowledgeStatus | "All">("All");
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [selectedItemId, setSelectedItemId] = useState<number | null>(initialKnowledgeItems[0].id);
-  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [publishedOnly, setPublishedOnly] = useState(false);
-  const [message, setMessage] = useState("Knowledge items are saved in the current frontend session until backend integration.");
+  const [message, setMessage] = useState("Loading knowledge base from the backend.");
   const [form, setForm] = useState({
     title: "",
     category: "Product Info" as KnowledgeCategory,
@@ -106,26 +102,26 @@ export default function KnowledgeBasePage() {
     summary: "",
   });
 
-  useEffect(() => {
-    const storedItems = localStorage.getItem(KNOWLEDGE_ITEMS_KEY);
-    if (!storedItems) {
-      return;
-    }
-
+  const loadItems = async () => {
     try {
-      const parsedItems = JSON.parse(storedItems) as KnowledgeItem[];
-      if (Array.isArray(parsedItems) && parsedItems.length > 0) {
-        setItems(parsedItems);
-        setSelectedItemId(parsedItems[0].id);
-      }
-    } catch {
-      setMessage("Saved knowledge items could not be restored, so the default demo library is loaded.");
+      const token = getStoredAuthToken();
+      const [records, campaignRecords] = await Promise.all([
+        apiGet<KnowledgeApiRecord[]>("/api/knowledge", token),
+        apiGet<CampaignRecord[]>("/api/admin/campaigns", token),
+      ]);
+      const nextItems = records.map(toKnowledgeItem);
+      setItems(nextItems);
+      setCampaigns(campaignRecords);
+      setSelectedItemId((current) => current || nextItems[0]?.id || null);
+      setMessage(nextItems.length ? "Knowledge base loaded from the backend." : "No knowledge entries yet. Create one to make it available for review or retrieval.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load the knowledge base.");
     }
-  }, []);
+  };
 
   useEffect(() => {
-    localStorage.setItem(KNOWLEDGE_ITEMS_KEY, JSON.stringify(items));
-  }, [items]);
+    void loadItems();
+  }, []);
 
   const filteredItems = useMemo(() => {
     const searchText = query.trim().toLowerCase();
@@ -146,6 +142,12 @@ export default function KnowledgeBasePage() {
   const publishedCount = items.filter((item) => item.status === "Published").length;
   const reviewCount = items.filter((item) => item.status === "Needs Review").length;
   const draftCount = items.filter((item) => item.status === "Draft").length;
+  const campaignStatusById = useMemo(() => new Map(campaigns.map((campaign) => [campaign.id, campaign.status])), [campaigns]);
+  const isHistoricalScope = (campaignId: string | null) => campaignId !== null && ["completed", "archived"].includes(campaignStatusById.get(campaignId) || "");
+  const availableCampaigns = useMemo(
+    () => campaigns.filter((campaign) => !["completed", "archived"].includes(campaign.status)),
+    [campaigns],
+  );
 
   const resetForm = () => {
     setEditingId(null);
@@ -159,7 +161,7 @@ export default function KnowledgeBasePage() {
     });
   };
 
-  const submitKnowledgeItem = (event: FormEvent<HTMLFormElement>) => {
+  const submitKnowledgeItem = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const cleanTitle = form.title.trim();
     const cleanSummary = form.summary.trim();
@@ -169,48 +171,31 @@ export default function KnowledgeBasePage() {
       setMessage("Please enter title, campaign scope, and knowledge content before saving.");
       return;
     }
-
-    if (editingId) {
-      setItems((currentItems) =>
-        currentItems.map((item) =>
-          item.id === editingId
-            ? {
-                ...item,
-                title: cleanTitle,
-                category: form.category,
-                status: form.status,
-                campaign: cleanCampaign,
-                summary: cleanSummary,
-                updatedAt: "Just now",
-              }
-            : item
-        )
-      );
-      setSelectedItemId(editingId);
-      setMessage(`${cleanTitle} has been updated.`);
-      resetForm();
+    if (cleanCampaign !== "All Campaigns" && isHistoricalScope(cleanCampaign)) {
+      setMessage("Knowledge for a completed or archived campaign is read-only. Create revised guidance in a new active campaign.");
       return;
     }
 
-    const newId = Date.now();
-    setItems((currentItems) => [
-      {
-        id: newId,
-        title: cleanTitle,
-        category: form.category,
-        status: form.status,
-        campaign: cleanCampaign,
-        summary: cleanSummary,
-        updatedAt: "Just now",
-      },
-      ...currentItems,
-    ]);
-    setSelectedItemId(newId);
-    setMessage(`${cleanTitle} has been added to the knowledge base.`);
-    resetForm();
+    const payload = { title: cleanTitle, category: form.category, status: toApiStatus(form.status), content: cleanSummary, campaign_id: cleanCampaign === "All Campaigns" ? null : cleanCampaign };
+    try {
+      const saved = editingId
+        ? await apiPut<KnowledgeApiRecord>(`/api/knowledge/${editingId}`, payload, getStoredAuthToken())
+        : await apiPost<KnowledgeApiRecord>("/api/knowledge", payload, getStoredAuthToken());
+      const nextItem = toKnowledgeItem(saved);
+      setItems((current) => editingId ? current.map((item) => item.id === editingId ? nextItem : item) : [nextItem, ...current]);
+      setSelectedItemId(nextItem.id);
+      setMessage(`${cleanTitle} has been ${editingId ? "updated" : "added"}.`);
+      resetForm();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save the knowledge item.");
+    }
   };
 
   const editItem = (item: KnowledgeItem) => {
+    if (isHistoricalScope(item.campaignId)) {
+      setMessage("This knowledge belongs to completed or archived campaign history and is read-only.");
+      return;
+    }
     setSelectedItemId(item.id);
     setOpenMenuId(null);
     setEditingId(item.id);
@@ -224,37 +209,57 @@ export default function KnowledgeBasePage() {
     setMessage(`Editing ${item.title}.`);
   };
 
-  const deleteItem = (id: number) => {
-    const remainingItems = items.filter((item) => item.id !== id);
-    setItems(remainingItems);
-    setOpenMenuId(null);
-    if (editingId === id) {
-      resetForm();
+  const deleteItem = async (id: string) => {
+    const item = items.find((current) => current.id === id);
+    if (item && isHistoricalScope(item.campaignId)) {
+      setMessage("This knowledge belongs to completed or archived campaign history and cannot be deleted.");
+      return;
     }
-    if (selectedItemId === id) {
-      setSelectedItemId(remainingItems[0]?.id ?? null);
+    try {
+      await apiDelete(`/api/knowledge/${id}`, getStoredAuthToken());
+      const remainingItems = items.filter((item) => item.id !== id);
+      setItems(remainingItems);
+      setOpenMenuId(null);
+      if (editingId === id) resetForm();
+      if (selectedItemId === id) setSelectedItemId(remainingItems[0]?.id ?? null);
+      setMessage("Knowledge item deleted.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to delete the knowledge item.");
     }
-    setMessage("Knowledge item removed from the current frontend session.");
   };
 
-  const updateStatus = (id: number, status: KnowledgeStatus) => {
-    setItems((currentItems) => currentItems.map((item) => (item.id === id ? { ...item, status, updatedAt: "Just now" } : item)));
-    setOpenMenuId(null);
-    setMessage(`Knowledge item marked as ${status}.`);
+  const updateStatus = async (id: string, status: KnowledgeStatus) => {
+    const item = items.find((current) => current.id === id);
+    if (item && isHistoricalScope(item.campaignId)) {
+      setMessage("This knowledge belongs to completed or archived campaign history and cannot be changed.");
+      return;
+    }
+    try {
+      const saved = await apiPut<KnowledgeApiRecord>(`/api/knowledge/${id}`, { status: toApiStatus(status) }, getStoredAuthToken());
+      const nextItem = toKnowledgeItem(saved);
+      setItems((current) => current.map((item) => item.id === id ? nextItem : item));
+      setOpenMenuId(null);
+      setMessage(`Knowledge item marked as ${status}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update knowledge status.");
+    }
   };
 
-  const duplicateItem = (item: KnowledgeItem) => {
-    const newItem = {
-      ...item,
-      id: Date.now(),
-      title: `${item.title} Copy`,
-      status: "Draft" as KnowledgeStatus,
-      updatedAt: "Just now",
-    };
-    setItems((currentItems) => [newItem, ...currentItems]);
-    setSelectedItemId(newItem.id);
-    setOpenMenuId(null);
-    setMessage(`${item.title} duplicated as a draft item.`);
+  const duplicateItem = async (item: KnowledgeItem) => {
+    if (isHistoricalScope(item.campaignId)) {
+      setMessage("This knowledge belongs to completed or archived campaign history. Create new guidance in an active campaign instead.");
+      return;
+    }
+    try {
+      const saved = await apiPost<KnowledgeApiRecord>("/api/knowledge", { title: `${item.title} Copy`, category: item.category, status: "draft", content: item.summary, campaign_id: item.campaign === "All Campaigns" ? null : item.campaign }, getStoredAuthToken());
+      const nextItem = toKnowledgeItem(saved);
+      setItems((current) => [nextItem, ...current]);
+      setSelectedItemId(nextItem.id);
+      setOpenMenuId(null);
+      setMessage(`${item.title} duplicated as a draft item.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to duplicate the knowledge item.");
+    }
   };
 
   const handleStatFilter = (status: KnowledgeStatus | "All") => {
@@ -354,7 +359,21 @@ export default function KnowledgeBasePage() {
                     </div>
                   </label>
 
-                  <AdminFormField label="Campaign Scope" value={form.campaign} onChange={(value) => setForm((current) => ({ ...current, campaign: value }))} />
+                  <label className="block">
+                    <span className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.16em] text-white/42">Campaign Scope</span>
+                    <select
+                      value={form.campaign}
+                      onChange={(event) => setForm((current) => ({ ...current, campaign: event.target.value }))}
+                      className="w-full rounded-[13px] border border-white/[0.08] bg-[#191c28] px-4 py-3 text-[13px] leading-6 text-white/84 outline-none focus:border-[#b9b7ff]/40"
+                    >
+                      <option value="All Campaigns" className="bg-[#191c28]">All Campaigns (global knowledge)</option>
+                      {availableCampaigns.map((campaign) => (
+                        <option key={campaign.id} value={campaign.id} className="bg-[#191c28]">
+                          {campaign.name} ({campaign.status})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <AdminFormField label="Knowledge Content" value={form.summary} onChange={(value) => setForm((current) => ({ ...current, summary: value }))} lines={5} />
 
                   <div className="flex flex-wrap gap-2">
@@ -459,15 +478,17 @@ export default function KnowledgeBasePage() {
                             <span>Updated: {item.updatedAt}</span>
                             <span>{item.status === "Published" ? "AI-ready" : "Not AI-ready yet"}</span>
                           </div>
+                          {isHistoricalScope(item.campaignId) ? <div className="mt-2 text-[11px] text-[#f8dc9b]">Historical campaign knowledge is read-only.</div> : null}
                         </button>
 
                         <div className="flex flex-wrap gap-2">
-                          <StatusButton label="Publish" disabled={item.status === "Published"} onClick={() => updateStatus(item.id, "Published")} />
-                          <StatusButton label="Review" disabled={item.status === "Needs Review"} onClick={() => updateStatus(item.id, "Needs Review")} />
+                          <StatusButton label="Publish" disabled={item.status === "Published" || isHistoricalScope(item.campaignId)} onClick={() => updateStatus(item.id, "Published")} />
+                          <StatusButton label="Review" disabled={item.status === "Needs Review" || isHistoricalScope(item.campaignId)} onClick={() => updateStatus(item.id, "Needs Review")} />
                           <button
                             type="button"
                             onClick={() => editItem(item)}
-                            className="grid h-9 w-9 place-items-center rounded-[10px] border border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/[0.06]"
+                            disabled={isHistoricalScope(item.campaignId)}
+                            className="grid h-9 w-9 place-items-center rounded-[10px] border border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35"
                             aria-label={`Edit ${item.title}`}
                           >
                             <Pencil size={14} strokeWidth={2.1} aria-hidden="true" />
@@ -475,7 +496,8 @@ export default function KnowledgeBasePage() {
                           <button
                             type="button"
                             onClick={() => deleteItem(item.id)}
-                            className="grid h-9 w-9 place-items-center rounded-[10px] border border-red-400/15 bg-red-500/10 text-red-200 hover:bg-red-500/15"
+                            disabled={isHistoricalScope(item.campaignId)}
+                            className="grid h-9 w-9 place-items-center rounded-[10px] border border-red-400/15 bg-red-500/10 text-red-200 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-35"
                             aria-label={`Delete ${item.title}`}
                           >
                             <Trash2 size={14} strokeWidth={2.1} aria-hidden="true" />

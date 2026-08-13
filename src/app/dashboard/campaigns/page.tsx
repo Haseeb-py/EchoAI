@@ -1,5 +1,5 @@
-import { AgentCampaignsPage } from "@/components/dashboard/AgentWorkflows";
+import PersistedCampaignLauncherPage from "@/components/dashboard/PersistedCampaignLauncherPage";
 
 export default function DashboardCampaignsRoute() {
-  return <AgentCampaignsPage />;
+  return <PersistedCampaignLauncherPage />;
 }

@@ -1,5 +1,5 @@
-import { AgentLeadsPage } from "@/components/dashboard/AgentWorkflows";
+import PersistedAgentLeadsPage from "@/components/dashboard/PersistedAgentLeadsPage";
 
 export default function DashboardLeadsRoute() {
-  return <AgentLeadsPage />;
+  return <PersistedAgentLeadsPage />;
 }

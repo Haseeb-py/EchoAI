@@ -1,177 +1,58 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Bot, CheckCircle2, Cloud, Mic, Phone, Save, Settings, Zap } from "lucide-react";
-import {
-  AdminFormField,
-  AdminMessage,
-  AdminPanel,
-  AdminScreenShell,
-  AdminSelectField,
-  AdminStatCard,
-  SectionTitle,
-} from "@/components/admin/AdminScreenShell";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Bot, CheckCircle2, Cloud, Mic, RefreshCw, Save, Settings, Zap } from "lucide-react";
+import { AdminFormField, AdminMessage, AdminPanel, AdminScreenShell, AdminSelectField, AdminStatCard, SectionTitle } from "@/components/admin/AdminScreenShell";
 import { Badge } from "@/components/ui/ui-components";
 import { Button } from "@/components/ui/Button";
+import { apiGet, apiPut } from "@/lib/api-client";
+import { getStoredAuthToken } from "@/lib/auth";
 
-type IntegrationStatus = "Planned" | "Configured" | "Testing";
-type IntegrationItem = {
-  id: number;
-  name: string;
-  purpose: string;
-  status: IntegrationStatus;
-  icon: React.ReactNode;
-};
-
-const modeOptions = ["Demo", "Staging", "Production"] as const;
+type IntegrationStatus = "configured" | "not_configured" | "pending";
+type Integration = { id: string; name: string; purpose: string; status: IntegrationStatus };
+type Settings = { workspace_name: string; max_concurrent_calls: number; default_language: "English" | "Urdu" | "Arabic"; environment_mode: "Demo" | "Staging" | "Production"; updated_at: string; integrations: Integration[] };
+const defaults: Settings = { workspace_name: "EchoAI Admin Workspace", max_concurrent_calls: 100, default_language: "English", environment_mode: "Demo", updated_at: "", integrations: [] };
 const languageOptions = ["English", "Urdu", "Arabic"] as const;
-const thresholdOptions = ["Negative sentiment", "Strong negative sentiment", "Escalation keyword hit"] as const;
-
-const initialIntegrations: IntegrationItem[] = [
-  { id: 1, name: "FastAPI Backend", purpose: "Core API layer", status: "Planned", icon: <Cloud size={16} strokeWidth={2.1} aria-hidden="true" /> },
-  { id: 2, name: "Deepgram STT", purpose: "Speech-to-text", status: "Planned", icon: <Mic size={16} strokeWidth={2.1} aria-hidden="true" /> },
-  { id: 3, name: "Groq LLM", purpose: "AI response engine", status: "Planned", icon: <Bot size={16} strokeWidth={2.1} aria-hidden="true" /> },
-  { id: 4, name: "Twilio Voice", purpose: "Outbound calls", status: "Planned", icon: <Phone size={16} strokeWidth={2.1} aria-hidden="true" /> },
-];
+const modeOptions = ["Demo", "Staging", "Production"] as const;
 
 export default function SystemSettingsPage() {
-  const [settings, setSettings] = useState({
-    workspaceName: "EchoAI Admin Workspace",
-    maxConcurrentCalls: "100",
-    defaultLanguage: "English",
-    escalationThreshold: "Negative sentiment",
-    mode: "Demo",
-  });
-  const [integrations, setIntegrations] = useState<IntegrationItem[]>(initialIntegrations);
-  const [selectedIntegrationId, setSelectedIntegrationId] = useState<number>(initialIntegrations[0].id);
-  const [message, setMessage] = useState("System Settings is interactive in the frontend session. Workspace values and integration readiness update instantly.");
-
-  const selectedIntegration = integrations.find((item) => item.id === selectedIntegrationId) || integrations[0];
-  const configuredCount = integrations.filter((item) => item.status === "Configured").length;
-  const testingCount = integrations.filter((item) => item.status === "Testing").length;
-
-  const updateIntegration = (id: number, status: IntegrationStatus, nextMessage: string) => {
-    setIntegrations((currentIntegrations) =>
-      currentIntegrations.map((item) => (item.id === id ? { ...item, status } : item))
-    );
-    setMessage(nextMessage);
+  const [settings, setSettings] = useState<Settings>(defaults);
+  const [message, setMessage] = useState("Loading persisted workspace configuration.");
+  const [saving, setSaving] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      const data = await apiGet<Settings>("/api/admin/settings", getStoredAuthToken());
+      setSettings(data);
+      setMessage("Workspace defaults and service readiness are synced with the backend. Provider secrets are never displayed here.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load system settings.");
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  const configuredCount = settings.integrations.filter((item) => item.status === "configured").length;
+  const modeAccent = useMemo(() => settings.environment_mode === "Production" ? "text-[#a7f3c4]" : settings.environment_mode === "Staging" ? "text-[#f6c56f]" : "text-[#f3a8ff]", [settings.environment_mode]);
+  const save = async () => {
+    try {
+      setSaving(true);
+      const data = await apiPut<Settings>("/api/admin/settings", {
+        workspace_name: settings.workspace_name,
+        max_concurrent_calls: Number(settings.max_concurrent_calls),
+        default_language: settings.default_language,
+        environment_mode: settings.environment_mode,
+      }, getStoredAuthToken());
+      setSettings(data);
+      setMessage("Persisted workspace defaults saved. The call limit is enforced when new calls are started.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save system settings.");
+    } finally { setSaving(false); }
   };
-
-  const modeAccent = useMemo(() => {
-    if (settings.mode === "Production") return "text-[#a7f3c4]";
-    if (settings.mode === "Staging") return "text-[#f6c56f]";
-    return "text-[#f3a8ff]";
-  }, [settings.mode]);
-
-  return (
-    <AdminScreenShell
-      activeKey="settings"
-      contextLabel="Settings"
-      eyebrow="Admin Settings / System Readiness"
-      title="System Settings"
-      description="Manage workspace configuration, integration readiness, voice service settings, and operational defaults."
-    >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <AdminStatCard label="Workspace" value="Ready" accent="text-[#a7f3c4]" icon={<CheckCircle2 size={17} strokeWidth={2.1} aria-hidden="true" />} />
-        <button type="button" onClick={() => setSelectedIntegrationId(initialIntegrations[0].id)} className="text-left">
-          <AdminStatCard label="Integrations" value={String(integrations.length).padStart(2, "0")} accent="text-[#b9b7ff]" icon={<Zap size={17} strokeWidth={2.1} aria-hidden="true" />} />
-        </button>
-        <button type="button" onClick={() => setMessage("Voice stack depends on Deepgram and Twilio integration readiness.")} className="text-left">
-          <AdminStatCard label="Voice Stack" value={configuredCount > 0 ? "Live" : "Plan"} accent="text-[#f6c56f]" icon={<Mic size={17} strokeWidth={2.1} aria-hidden="true" />} />
-        </button>
-        <AdminStatCard label="Mode" value={settings.mode} accent={modeAccent} icon={<Settings size={17} strokeWidth={2.1} aria-hidden="true" />} />
-      </div>
-
-      <AdminMessage>
-        {`${message} Configured integrations: ${configuredCount}. Testing integrations: ${testingCount}.`}
-      </AdminMessage>
-
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[0.82fr_1.18fr]">
-        <AdminPanel glow>
-          <SectionTitle eyebrow="Workspace Defaults" title="Configuration" />
-          <div className="space-y-4">
-            <AdminFormField label="Workspace Name" value={settings.workspaceName} onChange={(value) => setSettings((current) => ({ ...current, workspaceName: value }))} />
-            <AdminFormField label="Max Concurrent Calls" value={settings.maxConcurrentCalls} onChange={(value) => setSettings((current) => ({ ...current, maxConcurrentCalls: value }))} />
-            <AdminSelectField label="Default Language" value={settings.defaultLanguage as (typeof languageOptions)[number]} options={languageOptions} onChange={(value) => setSettings((current) => ({ ...current, defaultLanguage: value }))} />
-            <AdminSelectField label="Escalation Threshold" value={settings.escalationThreshold as (typeof thresholdOptions)[number]} options={thresholdOptions} onChange={(value) => setSettings((current) => ({ ...current, escalationThreshold: value }))} />
-            <AdminSelectField label="Environment Mode" value={settings.mode as (typeof modeOptions)[number]} options={modeOptions} onChange={(value) => setSettings((current) => ({ ...current, mode: value }))} />
-          </div>
-          <Button
-            type="button"
-            fullWidth
-            onClick={() => setMessage("Settings saved in the current frontend session. Backend save will be connected later.")}
-            className="mt-5 !h-12 !rounded-[12px] !bg-[#b9b7ff] !text-[13px] !font-semibold !uppercase !tracking-[0.12em] !text-[#20264b]"
-            leftIcon={<Save size={15} strokeWidth={2.2} aria-hidden="true" />}
-          >
-            Save Settings
-          </Button>
-        </AdminPanel>
-
-        <AdminPanel>
-          <SectionTitle eyebrow="Integrations" title="Service readiness" />
-
-          {selectedIntegration ? (
-            <div className="mb-4 rounded-[16px] border border-[#b9b7ff]/18 bg-[#b9b7ff]/8 p-4">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                <div className="font-semibold text-white">{selectedIntegration.name}</div>
-                <Badge color={selectedIntegration.status === "Configured" ? "success" : selectedIntegration.status === "Testing" ? "tertiary" : "neutral"}>
-                  {selectedIntegration.status}
-                </Badge>
-              </div>
-              <p className="text-[12px] leading-5 text-white/46">{selectedIntegration.purpose}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => updateIntegration(selectedIntegration.id, "Configured", `${selectedIntegration.name} marked as Configured.`)}
-                  className="inline-flex h-9 items-center rounded-[10px] border border-white/10 bg-white/[0.03] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/68 hover:bg-white/[0.06]"
-                >
-                  Configure
-                </button>
-                <button
-                  type="button"
-                  onClick={() => updateIntegration(selectedIntegration.id, "Testing", `${selectedIntegration.name} moved to Testing.`)}
-                  className="inline-flex h-9 items-center rounded-[10px] border border-white/10 bg-white/[0.03] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/68 hover:bg-white/[0.06]"
-                >
-                  Test
-                </button>
-                <button
-                  type="button"
-                  onClick={() => updateIntegration(selectedIntegration.id, "Planned", `${selectedIntegration.name} moved back to Planned.`)}
-                  className="inline-flex h-9 items-center rounded-[10px] border border-white/10 bg-white/[0.03] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/68 hover:bg-white/[0.06]"
-                >
-                  Reset
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="grid gap-3 md:grid-cols-2">
-            {integrations.map((integration) => (
-              <button
-                key={integration.id}
-                type="button"
-                onClick={() => {
-                  setSelectedIntegrationId(integration.id);
-                  setMessage(`${integration.name} selected for settings review.`);
-                }}
-                className={[
-                  "rounded-[16px] border p-4 text-left transition-colors",
-                  selectedIntegrationId === integration.id ? "border-[#b9b7ff]/24 bg-[#b9b7ff]/8" : "border-white/[0.06] bg-white/[0.025] hover:bg-white/[0.04]",
-                ].join(" ")}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <span className="grid h-10 w-10 place-items-center rounded-[12px] bg-[#b9b7ff]/12 text-[#d9dcff]">{integration.icon}</span>
-                  <Badge color={integration.status === "Configured" ? "success" : integration.status === "Testing" ? "tertiary" : "neutral"}>
-                    {integration.status}
-                  </Badge>
-                </div>
-                <div className="mt-4 font-headline text-[22px] font-semibold tracking-[-0.03em] text-white">{integration.name}</div>
-                <p className="mt-2 text-[12px] leading-5 text-white/46">{integration.purpose}</p>
-              </button>
-            ))}
-          </div>
-        </AdminPanel>
-      </div>
-    </AdminScreenShell>
-  );
+  return <AdminScreenShell activeKey="settings" contextLabel="Settings" eyebrow="Admin Settings / System Readiness" title="System Settings" description="Manage persisted workspace defaults and inspect service readiness. Provider credentials remain environment-only.">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"><AdminStatCard label="Workspace" value="Ready" accent="text-[#a7f3c4]" icon={<CheckCircle2 size={17} />} /><AdminStatCard label="Integrations" value={String(settings.integrations.length).padStart(2, "0")} accent="text-[#b9b7ff]" icon={<Zap size={17} />} /><AdminStatCard label="Configured" value={String(configuredCount).padStart(2, "0")} accent="text-[#8fdde0]" icon={<Mic size={17} />} /><AdminStatCard label="Mode" value={settings.environment_mode} accent={modeAccent} icon={<Settings size={17} />} /></div>
+    <AdminMessage>{message}</AdminMessage>
+    <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[0.82fr_1.18fr]"><AdminPanel glow><SectionTitle eyebrow="Workspace Defaults" title="Configuration" /><div className="space-y-4"><AdminFormField label="Workspace Name" value={settings.workspace_name} onChange={(workspace_name) => setSettings((current) => ({ ...current, workspace_name }))} /><AdminFormField label="Max Concurrent Calls" value={String(settings.max_concurrent_calls)} onChange={(value) => setSettings((current) => ({ ...current, max_concurrent_calls: Number(value) || 0 }))} /><AdminSelectField label="Default Language" value={settings.default_language} options={languageOptions} onChange={(default_language) => setSettings((current) => ({ ...current, default_language }))} /><AdminSelectField label="Environment Mode" value={settings.environment_mode} options={modeOptions} onChange={(environment_mode) => setSettings((current) => ({ ...current, environment_mode }))} /></div><div className="mt-4 rounded-[12px] border border-[#f6c56f]/18 bg-[#2a2317] p-3 text-[12px] leading-6 text-[#f8dc9b]">The concurrent-call limit is enforced by the backend. Escalation rules and provider credentials remain server-controlled.</div><div className="mt-5 grid grid-cols-2 gap-2"><Button type="button" fullWidth disabled={saving} onClick={() => void save()} className="!h-12 !rounded-[12px] !bg-[#b9b7ff] !text-[13px] !font-semibold !uppercase !tracking-[0.12em] !text-[#20264b]" leftIcon={<Save size={15} />}>Save Settings</Button><button type="button" onClick={() => void load()} className={buttonClass}><RefreshCw size={14} /> Refresh</button></div></AdminPanel><AdminPanel><SectionTitle eyebrow="Integrations" title="Service readiness" /><div className="mt-4 grid gap-3 md:grid-cols-2">{settings.integrations.map((integration) => <IntegrationCard key={integration.id} integration={integration} />)}{!settings.integrations.length ? <div className={empty}>Service readiness is loading.</div> : null}</div></AdminPanel></div>
+  </AdminScreenShell>;
 }
+
+function IntegrationCard({ integration }: { integration: Integration }) { const Icon = integration.id === "backend" ? Cloud : integration.id === "groq" ? Bot : Mic; const statusLabel = integration.status === "configured" ? "Configured" : integration.status === "pending" ? "Pending" : "Not configured"; return <div className="rounded-[16px] border border-white/[0.06] bg-white/[0.025] p-4"><div className="flex items-start justify-between gap-3"><span className="grid h-10 w-10 place-items-center rounded-[12px] bg-[#b9b7ff]/12 text-[#d9dcff]"><Icon size={16} /></span><Badge color={integration.status === "configured" ? "success" : integration.status === "pending" ? "tertiary" : "neutral"}>{statusLabel}</Badge></div><div className="mt-4 font-headline text-[22px] font-semibold tracking-[-0.03em] text-white">{integration.name}</div><p className="mt-2 text-[12px] leading-5 text-white/46">{integration.purpose}</p></div>; }
+const buttonClass = "inline-flex h-12 items-center justify-center gap-2 rounded-[12px] border border-white/12 bg-white/[0.03] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/74 hover:bg-white/[0.06]";
+const empty = "rounded-[12px] border border-white/[0.06] bg-white/[0.02] p-4 text-[13px] text-white/62";

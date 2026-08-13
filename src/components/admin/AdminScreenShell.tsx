@@ -109,6 +109,7 @@ export function AdminFormField({
   type = "text",
   lines = 1,
   placeholder,
+  disabled = false,
 }: {
   label: string;
   value: string;
@@ -116,6 +117,7 @@ export function AdminFormField({
   type?: string;
   lines?: number;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const fieldClass =
     "w-full rounded-[13px] border border-white/[0.08] bg-[#191c28] px-4 py-3 text-[13px] leading-6 text-white/84 outline-none transition-colors placeholder:text-white/28 focus:border-[#b9b7ff]/40";
@@ -128,16 +130,18 @@ export function AdminFormField({
           value={value}
           rows={lines}
           onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
           placeholder={placeholder || `Enter ${label.toLowerCase()}`}
-          className={`${fieldClass} resize-none`}
+          className={`${fieldClass} resize-none disabled:cursor-not-allowed disabled:opacity-50`}
         />
       ) : (
         <input
           type={type}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
           placeholder={placeholder || `Enter ${label.toLowerCase()}`}
-          className={fieldClass}
+          className={`${fieldClass} disabled:cursor-not-allowed disabled:opacity-50`}
         />
       )}
     </label>

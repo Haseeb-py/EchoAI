@@ -1,5 +1,5 @@
-import TeamActivityPage from "@/components/supervisor/TeamActivityPage";
+import PersistedLiveCallsPage from "@/components/supervisor/PersistedLiveCallsPage";
 
 export default function SupervisorActivityRoute() {
-  return <TeamActivityPage />;
+  return <PersistedLiveCallsPage />;
 }

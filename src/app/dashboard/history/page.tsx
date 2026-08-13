@@ -1,5 +1,5 @@
-import { AgentHistoryPage } from "@/components/dashboard/AgentWorkflows";
+import PersistedCallHistoryPage from "@/components/dashboard/PersistedCallHistoryPage";
 
 export default function DashboardHistoryRoute() {
-  return <AgentHistoryPage />;
+  return <PersistedCallHistoryPage />;
 }

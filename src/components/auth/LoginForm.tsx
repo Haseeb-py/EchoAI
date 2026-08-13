@@ -16,6 +16,7 @@ import {
   persistAuthSession,
   type UserRole,
 } from "@/lib/auth";
+import { apiGet } from "@/lib/api-client";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -57,12 +58,11 @@ export default function LoginForm({
 
     if (roleFromToken) {
       setRole(roleFromToken);
-      const destination =
-        nextPath && canAccessPath(nextPath, roleFromToken)
-          ? nextPath
-          : getDefaultRouteForRole(roleFromToken);
-
-      router.replace(destination);
+      let cancelled = false;
+      void resolveDestination(roleFromToken, token, nextPath).then((destination) => {
+        if (!cancelled) router.replace(destination);
+      });
+      return () => { cancelled = true; };
     }
   }, [fresh, nextPath, router]);
 
@@ -82,13 +82,10 @@ export default function LoginForm({
 
     try {
       setBusy(true);
-      const response = await loginWithPassword({ email, password }, role);
+      const response = await loginWithPassword({ email, password });
       persistAuthSession(response.token, response.user);
 
-      const destination =
-        nextPath && canAccessPath(nextPath, response.user.role)
-          ? nextPath
-          : getDefaultRouteForRole(response.user.role);
+      const destination = await resolveDestination(response.user.role, response.token, nextPath);
 
       router.push(destination);
     } catch (submitError) {
@@ -157,4 +154,17 @@ export default function LoginForm({
       </form>
     </AuthShell>
   );
+}
+
+type SupervisorPreference = { default_landing_route: "/supervisor" | "/supervisor/activity" | "/supervisor/escalations" };
+
+async function resolveDestination(role: UserRole, token: string, nextPath: string) {
+  if (nextPath && canAccessPath(nextPath, role)) return nextPath;
+  if (role !== "supervisor") return getDefaultRouteForRole(role);
+  try {
+    const preference = await apiGet<SupervisorPreference>("/api/supervisor/preferences", token);
+    return preference.default_landing_route;
+  } catch {
+    return getDefaultRouteForRole(role);
+  }
 }

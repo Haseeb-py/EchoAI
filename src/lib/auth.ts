@@ -73,26 +73,6 @@ export function canAccessPath(pathname: string, role: UserRole) {
   return allowedRoles ? allowedRoles.includes(role) : true;
 }
 
-function base64UrlEncode(value: string) {
-  if (typeof globalThis.btoa === "function") {
-    return globalThis
-      .btoa(value)
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-  }
-
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(value, "utf8")
-      .toString("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-  }
-
-  return "";
-}
-
 function base64UrlDecode(value: string) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   const padding = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
@@ -197,21 +177,6 @@ export function getStoredSessionRole(): UserRole | null {
   return decodeRoleFromToken(token);
 }
 
-function buildDemoToken(user: AuthUser) {
-  const header = base64UrlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const payload = base64UrlEncode(
-    JSON.stringify({
-      sub: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8,
-    })
-  );
-
-  return `${header}.${payload}.echoai-demo`;
-}
-
 async function parseError(response: Response) {
   try {
     const body = (await response.json()) as { message?: string; error?: string; detail?: string };
@@ -254,14 +219,7 @@ async function safePost<T>(path: string, payload: object): Promise<T | null> {
   }
 }
 
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export async function loginWithPassword(
-  payload: LoginPayload,
-  selectedRole: UserRole = "agent"
-): Promise<AuthSuccessResponse> {
+export async function loginWithPassword(payload: LoginPayload): Promise<AuthSuccessResponse> {
   const apiResponse = await safePost<BackendAuthResponse>("/api/auth/login", payload);
 
   if (apiResponse) {
@@ -288,10 +246,5 @@ export async function signupWithPassword(payload: SignupPayload): Promise<Signup
     };
   }
 
-  await wait(700);
-
-  return {
-    success: true,
-    message: payload.role === "admin" ? "Admin account created successfully." : "Account created successfully.",
-  };
+  throw new Error("Organization registration failed. Please ensure the backend is running and no organization owner already exists.");
 }

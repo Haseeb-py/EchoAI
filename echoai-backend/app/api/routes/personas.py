@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_admin
 from app.models.persona import Persona
+from app.models.campaign import Campaign
 from app.schemas.persona import PersonaCreate, PersonaOut, PersonaUpdate
 
 router = APIRouter(prefix="/personas")
@@ -43,6 +44,14 @@ def update_persona(persona_id: str, payload: PersonaUpdate, db: Session = Depend
     persona = db.query(Persona).filter(Persona.id == persona_id).first()
     if not persona:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found")
+    is_used_by_active_campaign = db.query(Campaign).filter(
+        Campaign.persona_id == persona_id,
+        Campaign.status == "active",
+    ).first()
+    if payload.is_active is False and is_used_by_active_campaign:
+        raise HTTPException(status_code=409, detail="Pause or complete the active campaign before deactivating its persona")
+    if (payload.tone is not None or payload.description is not None) and is_used_by_active_campaign:
+        raise HTTPException(status_code=409, detail="Pause or complete the active campaign before changing its persona behavior")
 
     if payload.name is not None:
         persona.name = payload.name
@@ -63,6 +72,8 @@ def delete_persona(persona_id: str, db: Session = Depends(get_db), _user=Depends
     persona = db.query(Persona).filter(Persona.id == persona_id).first()
     if not persona:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found")
+    if db.query(Campaign).filter(Campaign.persona_id == persona_id).first():
+        raise HTTPException(status_code=409, detail="This persona is retained because it is referenced by campaign history")
     db.delete(persona)
     db.commit()
     return None

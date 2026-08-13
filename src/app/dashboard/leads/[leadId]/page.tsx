@@ -1,5 +1,5 @@
-import { AgentLeadDetailPage } from "@/components/dashboard/AgentWorkflows";
+import PersistedAgentLeadDetailPage from "@/components/dashboard/PersistedAgentLeadDetailPage";
 
 export default function DashboardLeadDetailRoute({ params }: { params: { leadId: string } }) {
-  return <AgentLeadDetailPage leadId={params.leadId} />;
+  return <PersistedAgentLeadDetailPage leadId={params.leadId} />;
 }

@@ -1,0 +1,120 @@
+@startuml EchoAI_UseCase_Admin
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #FFF7ED
+  BorderColor #EA580C
+  FontName Arial
+  FontSize 12
+}
+skinparam actor {
+  BackgroundColor #FFEDD5
+  BorderColor #9A3412
+  FontName Arial
+  FontSize 13
+}
+skinparam ArrowColor #EA580C
+skinparam ArrowFontName Arial
+skinparam ArrowFontSize 11
+
+actor Admin as ADM
+
+rectangle "EchoAI — Admin Portal" {
+
+  usecase "Login" as LOGIN
+  usecase "Validate Credentials" as VALIDATE
+
+  usecase "Manage Users" as USERS
+  usecase "Create User Account" as CREATE_USER
+  usecase "Hash Password (bcrypt)" as HASH
+  usecase "Lock User Account" as LOCK
+  usecase "Unlock User Account" as UNLOCK
+  usecase "Deactivate User Account" as DEACTIVATE
+  usecase "Reset User Password" as RESET_PW
+
+  usecase "Manage Campaigns" as CAMPAIGNS
+  usecase "Create Campaign Draft" as CREATE_CAMP
+  usecase "Activate Campaign" as ACTIVATE
+  usecase "Pause Campaign" as PAUSE
+
+  usecase "Manage Scripts" as SCRIPTS
+  usecase "Create Script" as CREATE_SCRIPT
+  usecase "Edit Script Content" as EDIT_SCRIPT
+  usecase "Activate Script" as ACTIVATE_SCRIPT
+
+  usecase "Manage Personas" as PERSONAS
+  usecase "Create Persona" as CREATE_PERSONA
+  usecase "Set Persona Tone" as SET_TONE
+
+  usecase "View Global Analytics" as ANALYTICS
+  usecase "Filter by Date Range" as FILTER
+
+  usecase "Manage Knowledge Base" as KB
+  usecase "Add Knowledge Item" as ADD_KB
+  usecase "Filter by Category" as KB_FILTER
+
+  usecase "View Security and Access Log" as SECURITY
+  usecase "View Authentication Events" as AUTH_LOG
+
+  usecase "Configure System Settings" as SETTINGS
+
+  usecase "View Admin Dashboard" as DASH
+  usecase "View System KPIs" as KPIS
+
+}
+
+' Associations (Admin to all top-level use cases)
+ADM --> LOGIN
+ADM --> DASH
+ADM --> USERS
+ADM --> CAMPAIGNS
+ADM --> SCRIPTS
+ADM --> PERSONAS
+ADM --> ANALYTICS
+ADM --> KB
+ADM --> SECURITY
+ADM --> SETTINGS
+
+' Login
+LOGIN ..> VALIDATE : <<include>>
+
+' Dashboard
+DASH ..> KPIS : <<include>>
+
+' ---- User Management ----
+' Creating a user always hashes the password
+USERS ..> CREATE_USER : <<include>>
+CREATE_USER ..> HASH : <<include>>
+
+' Lock, Unlock, Deactivate, Reset extend Manage Users (conditional actions per user row)
+LOCK ..> USERS : <<extend>>
+UNLOCK ..> USERS : <<extend>>
+DEACTIVATE ..> USERS : <<extend>>
+RESET_PW ..> USERS : <<extend>>
+
+' ---- Campaign Management ----
+CAMPAIGNS ..> CREATE_CAMP : <<include>>
+ACTIVATE ..> CAMPAIGNS : <<extend>>
+PAUSE ..> CAMPAIGNS : <<extend>>
+
+' ---- Script Management ----
+SCRIPTS ..> CREATE_SCRIPT : <<include>>
+EDIT_SCRIPT ..> SCRIPTS : <<extend>>
+ACTIVATE_SCRIPT ..> SCRIPTS : <<extend>>
+
+' ---- Persona Management ----
+PERSONAS ..> CREATE_PERSONA : <<include>>
+CREATE_PERSONA ..> SET_TONE : <<include>>
+
+' ---- Analytics ----
+ANALYTICS ..> FILTER : <<include>>
+
+' ---- Knowledge Base ----
+KB ..> ADD_KB : <<include>>
+KB_FILTER ..> KB : <<extend>>
+
+' ---- Security Log ----
+SECURITY ..> AUTH_LOG : <<include>>
+
+@enduml

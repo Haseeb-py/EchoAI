@@ -24,7 +24,6 @@ import {
   launchAgentCampaign,
   readAgentActiveCalls,
   readAgentCampaigns,
-  readAgentScripts,
   updateAgentLeadFields,
   updateAgentLeadScore,
   updateAgentLeadStatus,

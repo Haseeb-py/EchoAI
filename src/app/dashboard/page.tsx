@@ -1,5 +1,5 @@
-import AgentDashboard from "@/components/dashboard/AgentDashboard";
+import PersistedAgentDashboardPage from "@/components/dashboard/PersistedAgentDashboardPage";
 
 export default function DashboardPage() {
-  return <AgentDashboard />;
+  return <PersistedAgentDashboardPage />;
 }

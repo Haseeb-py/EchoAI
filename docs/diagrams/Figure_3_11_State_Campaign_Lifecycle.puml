@@ -11,43 +11,48 @@ title State Transition Diagram: Campaign Lifecycle
 
 [*] --> Draft : Admin creates campaign\nPOST /api/admin/campaigns
 
-state Draft
-Draft : Script and Persona being configured
-Draft : Readiness score < 100%
-Draft : Activate button disabled
-Draft : Campaign context in localStorage
+state Draft {
+  : Script and Persona being configured
+  : Readiness score < 100%
+  : Activate button disabled
+  : Campaign context in localStorage
+}
 
 Draft --> Draft : Admin edits script,\npersona, context fields\n(PUT /api/admin/scripts, personas)
 
 Draft --> Active : Readiness == 100%,\nAdmin clicks Activate\nPOST .../campaigns/{id}/activate
 
-state Active
-Active : Available for agent call operations
-Active : Script/Persona locked in
-Active : Live metrics displayed (future)
-Active : Agents see campaign in dashboard
+state Active {
+  : Available for agent call operations
+  : Script/Persona locked in
+  : Live metrics displayed (future)
+  : Agents see campaign in dashboard
+}
 
 Active --> Paused : Admin clicks Pause\nPOST .../campaigns/{id}/pause
 
-state Paused
-Paused : Operations suspended
-Paused : Configuration preserved
-Paused : Agents cannot use campaign
+state Paused {
+  : Operations suspended
+  : Configuration preserved
+  : Agents cannot use campaign
+}
 
 Paused --> Active : Admin clicks Resume\nPOST .../campaigns/{id}/activate
 
 Active --> Completed : Target call volume reached\nor campaign end date passed
 
-state Completed
-Completed : No longer accepting calls
-Completed : Historical data preserved
-Completed : Read-only state
+state Completed {
+  : No longer accepting calls
+  : Historical data preserved
+  : Read-only state
+}
 
 Completed --> Archived : System auto-archives\n(future sprint)
 
-state Archived
-Archived : Cannot be modified directly
-Archived : Available for reporting only
+state Archived {
+  : Cannot be modified directly
+  : Available for reporting only
+}
 
 Archived --> [*]
 
