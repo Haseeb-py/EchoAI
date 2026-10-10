@@ -19,6 +19,11 @@ class Settings:
     deepgram_api_key: str
     groq_api_key: str
     groq_model: str
+    livekit_url: str
+    livekit_api_key: str
+    livekit_api_secret: str
+    voice_worker_url: str
+    voice_worker_secret: str
 
 
 settings = Settings(
@@ -29,4 +34,9 @@ settings = Settings(
     deepgram_api_key=os.getenv("DEEPGRAM_API_KEY", ""),
     groq_api_key=os.getenv("GROQ_API_KEY", ""),
     groq_model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+    livekit_url=os.getenv("LIVEKIT_URL", ""),
+    livekit_api_key=os.getenv("LIVEKIT_API_KEY", ""),
+    livekit_api_secret=os.getenv("LIVEKIT_API_SECRET", ""),
+    voice_worker_url=os.getenv("VOICE_WORKER_URL", "").rstrip("/"),
+    voice_worker_secret=os.getenv("ECHOAI_INTERNAL_VOICE_SECRET", ""),
 )
