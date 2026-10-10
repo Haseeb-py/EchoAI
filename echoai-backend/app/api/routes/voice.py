@@ -12,6 +12,9 @@ from app.models.operations import Call, CallTurn, Lead
 from app.schemas.operations import CallComplete, TurnCreate, VoiceTextTurn
 from app.services.voice_adapter import VoiceProviderError, analyze_call, generate_reply, synthesize_audio, transcribe_audio
 from app.core.time import utcnow
+from app.core.config import settings
+from app.models.voice_session import VoiceSession
+import httpx
 
 router = APIRouter(prefix="/voice")
 
@@ -62,20 +65,31 @@ async def complete_analysis(call_id: str, db: Session = Depends(get_db), user=De
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
     _require_call_write_access(call, user)
+    if call.status == "completed":
+        return {"id": call.id, "status": call.status, "analysis": __import__("json").loads(call.analysis_json or "{}")}
     if call.status != "active":
         raise HTTPException(status_code=409, detail="Only active calls can be analyzed and completed")
     turns = db.query(CallTurn).filter(CallTurn.call_id == call_id).order_by(CallTurn.sequence).all()
     transcript = [{"speaker": turn.speaker, "transcript": turn.transcript} for turn in turns]
+    # Terminal database state is authoritative and must not depend on Groq,
+    # LiveKit, or worker cleanup succeeding afterwards.
+    call.status = "completed"
+    call.completed_at = utcnow()
+    session = db.query(VoiceSession).filter(VoiceSession.call_id == call_id).first()
+    if session:
+        session.status = "ended"
+        session.ended_at = call.completed_at
+    db.commit()
     try:
         analysis = await analyze_call(_analysis_prompt(call_id, transcript))
-    except VoiceProviderError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
+    except VoiceProviderError:
+        # Analysis is optional post-call enrichment. A provider outage must not
+        # leave the call active and prevent the agent starting the next call.
+        analysis = {"outcome": "completed", "summary": "Call completed; automated analysis was unavailable.", "follow_up_recommendation": ""}
     payload = CallComplete(
         outcome=str(analysis.get("outcome", "completed")), summary=str(analysis.get("summary", "")),
         analysis=analysis, follow_up_recommendation=str(analysis.get("follow_up_recommendation", "")),
     )
-    call.status = "completed"
-    call.completed_at = utcnow()
     call.outcome = payload.outcome
     call.summary = payload.summary
     import json
@@ -87,4 +101,13 @@ async def complete_analysis(call_id: str, db: Session = Depends(get_db), user=De
             lead.summary = payload.summary
             lead.status = "converted" if payload.outcome.lower() in {"converted", "conversion", "won"} else "follow_up"
     db.commit()
+    # Cleanup is best effort only; terminal state was already committed above.
+    if settings.voice_worker_url:
+        try:
+            httpx.post(
+                f"{settings.voice_worker_url}/api/internal/sessions/{call_id}/end",
+                headers={"X-EchoAI-Voice-Secret": settings.voice_worker_secret}, timeout=10,
+            )
+        except httpx.HTTPError:
+            pass
     return {"id": call.id, "status": call.status, "analysis": analysis}

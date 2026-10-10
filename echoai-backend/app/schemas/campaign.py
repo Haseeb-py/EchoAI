@@ -14,6 +14,7 @@ class CampaignCreate(BaseModel):
     script_id: str | None = None
     persona_id: str | None = None
     context: str = ""
+    call_direction: str = "outbound"
     status: str = "draft"
 
 
@@ -25,6 +26,7 @@ class CampaignUpdate(BaseModel):
     script_id: str | None = None
     persona_id: str | None = None
     context: str | None = None
+    call_direction: str | None = None
     status: str | None = None
 
 
@@ -39,6 +41,7 @@ class CampaignOut(BaseModel):
     script_snapshot_json: str = "{}"
     persona_snapshot_json: str = "{}"
     context: str
+    call_direction: str = "outbound"
     status: str
     activated_at: datetime | None = None
     completed_at: datetime | None = None

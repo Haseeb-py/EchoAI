@@ -20,6 +20,7 @@ class Campaign(Base):
     script_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
     persona_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
     context: Mapped[str] = mapped_column(Text, default="")
+    call_direction: Mapped[str] = mapped_column(String(16), default="outbound")
     status: Mapped[str] = mapped_column(String(24), default="draft")
     activated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

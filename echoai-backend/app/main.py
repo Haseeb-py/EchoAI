@@ -5,12 +5,14 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
-from app.api.routes import auth, scripts, personas, campaigns, agent, users, operations, voice, preferences, system_settings
+from app.api.routes import auth, scripts, personas, campaigns, agent, users, operations, voice, preferences, system_settings, voice_sessions
 from app.models import campaign, persona, script, user  # noqa: F401
 from app.models import operations as operations_models  # noqa: F401
 from app.models import preference as preference_model  # noqa: F401
 from app.models import security as security_model  # noqa: F401
 from app.models import system_setting as system_setting_model  # noqa: F401
+from app.models import voice_session as voice_session_model  # noqa: F401
+from app.models import voice_turn_receipt as voice_turn_receipt_model  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
 
@@ -39,6 +41,7 @@ def ensure_operational_columns():
             "archived_at": "DATETIME",
             "script_snapshot_json": "TEXT DEFAULT '{}'",
             "persona_snapshot_json": "TEXT DEFAULT '{}'",
+            "call_direction": "VARCHAR(16) DEFAULT 'outbound'",
         },
         "calls": {
             "agent_id": "VARCHAR(36)",
@@ -104,6 +107,7 @@ app.include_router(agent.router, prefix="/api", tags=["agent"])
 app.include_router(operations.admin_router, prefix="/api/admin", tags=["operations-admin"])
 app.include_router(operations.router, prefix="/api", tags=["operations"])
 app.include_router(voice.router, prefix="/api", tags=["temporary-voice"])
+app.include_router(voice_sessions.router, prefix="/api", tags=["voice-sessions"])
 app.include_router(preferences.router, prefix="/api", tags=["supervisor-preferences"])
 app.include_router(system_settings.router, prefix="/api", tags=["system-settings"])
 

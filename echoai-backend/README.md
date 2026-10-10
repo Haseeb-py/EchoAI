@@ -82,6 +82,9 @@ Base URL: http://localhost:8000
 - POST /api/voice/calls/{call_id}/audio-turn
 - POST /api/voice/calls/{call_id}/text-turn
 - POST /api/voice/calls/{call_id}/complete-analysis
+- POST /api/voice/sessions
+- GET /api/voice/sessions/{call_id}
+- POST /api/voice/sessions/{call_id}/end
 
 ## Production 3A Integration
 
@@ -94,6 +97,23 @@ The `/api/voice/*` routes are temporary browser-bridge endpoints. The production
 5. `GET /api/calls/{call_id}/analysis-prompt`, run one structured post-call LLM analysis, then `POST /api/calls/{call_id}/complete` with `outcome`, `summary`, `analysis`, and `follow_up_recommendation`.
 
 The production pipeline must preserve campaign lifecycle rules: only active campaigns start calls; paused campaigns allow existing calls to finish; completed and archived campaigns are historical records.
+
+### LiveKit session foundation
+
+The authenticated `POST /api/voice/sessions` endpoint accepts an existing active
+`call_id` and issues a 15-minute, call-scoped LiveKit participant token. It
+enforces the same call write access as transcript ingestion and records the
+room metadata in `voice_sessions`. Configure `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`; provider keys never reach the
+browser. The Module 3A worker is responsible for joining that room as the
+server participant, streaming audio, and submitting final turns through the
+core call APIs.
+
+To run the managed-worker path locally, start VoicePipeline on `8081` with the
+same `ECHOAI_INTERNAL_VOICE_SECRET`, then set `VOICE_WORKER_URL` to that URL
+in EchoAI's backend environment. The worker receives a call ID and unique room
+name over its internal API; it never receives browser credentials or provider
+secrets from EchoAI.
 
 ## Notes
 
