@@ -1,11 +1,13 @@
 """Authenticated LiveKit session issuance for the Module 3A voice worker."""
 
 from datetime import timedelta
+import logging
 from uuid import uuid4
 
 import httpx
 import json
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import Header
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -13,6 +15,8 @@ from app.api.routes.operations import _require_call_read_access, _require_call_w
 from app.core.config import settings
 from app.core.time import utcnow
 from app.models.operations import Call
+from app.models.voice_turn_receipt import VoiceTurnReceipt
+from app.services.live_call_flow import call_context, persist_ai_turn, persist_customer_turn
 from app.models.campaign import Campaign
 from app.models.persona import Persona
 from app.models.user import User
@@ -20,6 +24,22 @@ from app.models.voice_session import VoiceSession
 from app.schemas.voice_session import VoiceSessionCreate, VoiceSessionOut, VoiceSessionStatusOut
 
 router = APIRouter(prefix="/voice/sessions")
+logger = logging.getLogger(__name__)
+
+
+def _mark_worker_failure(call: Call, session: VoiceSession, db: Session) -> None:
+    """Release a call only when the worker is confirmed not to have joined."""
+    session.status = "worker_failed"
+    session.ended_at = utcnow()
+    if call.status == "active":
+        call.status = "disconnected"
+        call.completed_at = session.ended_at
+    db.commit()
+
+
+def _require_worker_secret(value: str | None) -> None:
+    if not settings.voice_worker_secret or value != settings.voice_worker_secret:
+        raise HTTPException(status_code=401, detail="Invalid internal voice-service credential")
 
 
 def _require_livekit_configuration() -> None:
@@ -47,7 +67,23 @@ def _start_worker(call: Call, session: VoiceSession, db: Session) -> None:
     """Ask the separately deployed Module 3A process to join this exact room."""
     if not settings.voice_worker_url:
         return
+    worker_headers = {"X-EchoAI-Voice-Secret": settings.voice_worker_secret}
+    try:
+        capability_response = httpx.get(
+            f"{settings.voice_worker_url}/api/internal/capabilities",
+            headers=worker_headers, timeout=5,
+        )
+        capability_response.raise_for_status()
+        if capability_response.json().get("worker_api_version") != "module-3b-context-v1":
+            raise ValueError("worker does not support the Module 3B campaign-context contract")
+    except (httpx.HTTPError, ValueError, TypeError) as error:
+        _mark_worker_failure(call, session, db)
+        raise HTTPException(
+            status_code=503,
+            detail="Voice worker is outdated. Start the vendored EchoAI/VoicePipeline worker with Module 3B support.",
+        ) from error
     campaign = db.query(Campaign).filter(Campaign.id == call.campaign_id).first()
+    logger.info("event=voice_worker_start call_id=%s campaign_id=%s agent_id=%s room_name=%s", call.id, call.campaign_id, call.agent_id, session.room_name)
     persona = db.query(Persona).filter(Persona.id == campaign.persona_id).first() if campaign and campaign.persona_id else None
     persona_payload = None
     opening_instruction = None
@@ -59,10 +95,23 @@ def _start_worker(call: Call, session: VoiceSession, db: Session) -> None:
             opening_instruction = next((node.get("prompt") for node in nodes if isinstance(node, dict) and node.get("type") == "opening"), None)
         except (TypeError, ValueError, json.JSONDecodeError):
             opening_instruction = None
-    if persona:
+    # Active campaigns freeze persona behavior at activation.  Older campaigns
+    # did not have a snapshot, so retain their current-persona fallback.
+    persona_snapshot: dict = {}
+    if campaign:
+        try:
+            parsed_persona = json.loads(campaign.persona_snapshot_json or "{}")
+            persona_snapshot = parsed_persona if isinstance(parsed_persona, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            persona_snapshot = {}
+    if persona_snapshot or persona:
+        persona_name = str(persona_snapshot.get("name") or (persona.name if persona else "EchoAI"))
+        persona_tone = str(persona_snapshot.get("tone") or (persona.tone if persona else "professional"))
+        persona_description = str(persona_snapshot.get("description") or (persona.description if persona else ""))
         persona_payload = {
-            "id": persona.id, "display_name": persona.name, "description": persona.description,
-            "system_prompt": f"You are EchoAI's {persona.name} persona. Tone: {persona.tone}. {persona.description}",
+            "id": str(persona_snapshot.get("id") or (persona.id if persona else campaign.persona_id)),
+            "display_name": persona_name, "description": persona_description,
+            "system_prompt": f"You are EchoAI's {persona_name} persona. Tone: {persona_tone}. {persona_description}",
             "tts": {"provider": "deepgram", "voice": "aura-2-asteria-en", "speech_rate": 1.0},
             "llm": {"temperature": 0.45},
         }
@@ -76,13 +125,15 @@ def _start_worker(call: Call, session: VoiceSession, db: Session) -> None:
                 "persona_id": campaign.persona_id if campaign else None,
                 "persona": persona_payload,
                 "opening_instruction": opening_instruction,
+                "opening_delivered": db.query(VoiceTurnReceipt).filter_by(
+                    call_id=call.id, speaker="ai", worker_turn_id="0",
+                ).first() is not None,
             },
-            headers={"X-EchoAI-Voice-Secret": settings.voice_worker_secret}, timeout=20,
+            headers=worker_headers, timeout=20,
         )
         response.raise_for_status()
     except httpx.HTTPError as error:
-        session.status = "worker_failed"
-        db.commit()
+        _mark_worker_failure(call, session, db)
         raise HTTPException(status_code=503, detail="Voice worker could not join the LiveKit room") from error
     session.status = "active"
     db.commit()
@@ -92,13 +143,64 @@ def _end_worker(call_id: str) -> None:
     if not settings.voice_worker_url:
         return
     try:
-        httpx.post(
-            f"{settings.voice_worker_url}/api/internal/sessions/{call_id}/end",
-            headers={"X-EchoAI-Voice-Secret": settings.voice_worker_secret}, timeout=10,
-        )
+        httpx.post(f"{settings.voice_worker_url}/api/internal/sessions/{call_id}/end", headers={"X-EchoAI-Voice-Secret": settings.voice_worker_secret}, timeout=10)
     except httpx.HTTPError:
-        # The call lifecycle remains authoritative even if the worker is already gone.
         return
+
+
+@router.post("/internal/{call_id}/customer-turn")
+def persist_live_customer_turn(call_id: str, payload: dict, x_echoai_voice_secret: str | None = Header(default=None), db: Session = Depends(get_db)):
+    """Persist one finalized STT turn and return compact stage context to worker."""
+    _require_worker_secret(x_echoai_voice_secret)
+    call = db.query(Call).filter(Call.id == call_id, Call.status == "active").first()
+    text = str(payload.get("text", "")).strip()
+    worker_turn_id = str(payload.get("turn_id", "")).strip()
+    if not call or not text:
+        raise HTTPException(status_code=404, detail="Active call or customer text not found")
+    if not worker_turn_id:
+        raise HTTPException(status_code=422, detail="turn_id is required for idempotent customer-turn persistence")
+    requested_next_node_id = payload.get("next_node_id")
+    if requested_next_node_id is not None:
+        requested_next_node_id = str(requested_next_node_id)
+    try:
+        _turn, transition, duplicate = persist_customer_turn(
+            db, call, text=text, worker_turn_id=worker_turn_id,
+            requested_next_node_id=requested_next_node_id,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    context = call_context(db, call)
+    context["stage_transition"] = {
+        "advanced": transition.advanced,
+        "previous_node_id": transition.previous_node_id,
+        "current_node_id": transition.current_node_id,
+        "reason": transition.reason,
+        "duplicate": duplicate,
+    }
+    return context
+
+@router.post("/internal/{call_id}/ai-turn")
+def persist_live_ai_turn(call_id: str, payload: dict, x_echoai_voice_secret: str | None = Header(default=None), db: Session = Depends(get_db)):
+    _require_worker_secret(x_echoai_voice_secret)
+    call = db.query(Call).filter(Call.id == call_id, Call.status == "active").first()
+    text, worker_turn_id = str(payload.get("text", "")).strip(), str(payload.get("turn_id", ""))
+    if not call or not text or not worker_turn_id:
+        raise HTTPException(status_code=422, detail="Active call, text, and turn_id are required")
+    try:
+        turn, duplicate = persist_ai_turn(db, call, text=text, worker_turn_id=worker_turn_id)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"id": turn.id, "duplicate": duplicate}
+
+
+@router.get("/internal/{call_id}/context")
+def get_live_call_context(call_id: str, x_echoai_voice_secret: str | None = Header(default=None), db: Session = Depends(get_db)):
+    """Hydrate a restarted worker from the persisted call, never another call."""
+    _require_worker_secret(x_echoai_voice_secret)
+    call = db.query(Call).filter(Call.id == call_id, Call.status == "active").first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Active call not found")
+    return call_context(db, call)
 
 
 @router.post("", response_model=VoiceSessionOut, status_code=status.HTTP_201_CREATED)
@@ -153,8 +255,22 @@ def get_live_voice_session(call_id: str, after: int = 0, db: Session = Depends(g
         raise HTTPException(status_code=503, detail="Voice worker is not configured")
     try:
         response = httpx.get(f"{settings.voice_worker_url}/api/internal/sessions/{call_id}/live", params={"after": after}, headers={"X-EchoAI-Voice-Secret": settings.voice_worker_secret}, timeout=4)
+        # A 404 is a confirmed worker-side end, unlike a timeout or 5xx. It is
+        # safe to close this database call and release its lead immediately.
+        if response.status_code == 404:
+            session = db.query(VoiceSession).filter(VoiceSession.call_id == call_id).first()
+            if call.status == "active":
+                call.status = "disconnected"
+                call.completed_at = utcnow()
+            if session and session.status != "ended":
+                session.status = "ended"
+                session.ended_at = call.completed_at or utcnow()
+            db.commit()
+            raise HTTPException(status_code=409, detail="The voice worker session ended unexpectedly; the call was closed safely")
         response.raise_for_status()
         return response.json()
+    except HTTPException:
+        raise
     except httpx.HTTPError as error:
         raise HTTPException(status_code=503, detail="Live voice events are temporarily unavailable") from error
 
@@ -166,10 +282,16 @@ def end_voice_session(call_id: str, db: Session = Depends(get_db), user: User = 
         raise HTTPException(status_code=404, detail="Call not found")
     _require_call_write_access(call, user)
     session = db.query(VoiceSession).filter(VoiceSession.call_id == call_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Voice session not found")
-    session.status = "ended"
-    session.ended_at = utcnow()
+    # Disconnect is intentional termination.  It is idempotent so a component
+    # unmount/repeated click cannot revive or corrupt a terminal call.
+    if call.status == "active":
+        call.status = "disconnected"
+        call.completed_at = utcnow()
+    if session:
+        session.status = "ended"
+        session.ended_at = utcnow()
     db.commit()
     _end_worker(call_id)
+    if not session:
+        return VoiceSessionStatusOut(id="", call_id=call.id, room_name="", status="ended")
     return VoiceSessionStatusOut(id=session.id, call_id=session.call_id, room_name=session.room_name, status=session.status)

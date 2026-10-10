@@ -23,7 +23,6 @@ from echoai_voice.models.session import ConnectionState
 from echoai_voice.models.transcript import TranscriptEvent
 from echoai_voice.models.tts import TtsAudioChunk
 from echoai_voice.models.persona import PersonaConfig
-from datetime import datetime, timezone
 from echoai_voice.services.persona_manager import PersonaUpdate
 
 
@@ -38,6 +37,7 @@ class VoiceUiController:
         participant_identity: str | None = None,
         persona_config: dict[str, Any] | None = None,
         opening_instruction: str | None = None,
+        opening_delivered: bool = False,
     ) -> None:
         self._room_name = room_name
         self._call_id = call_id
@@ -51,12 +51,17 @@ class VoiceUiController:
         self._event_log: list[dict[str, Any]] = []
         self._next_event_id = 1
         self._tts_started_turns: set[tuple[str | None, int | None]] = set()
+        self._generated_responses: dict[tuple[str | None, int], GeneratedResponseEvent] = {}
+        self._persisted_ai_turns: set[tuple[str | None, int]] = set()
+        self._tts_completed_turns: set[tuple[str | None, int | None]] = set()
+        self._published_final_transcripts: set[tuple[str | None, int]] = set()
+        self._wired_app_id: int | None = None
         # Managed EchoAI sessions receive their browser identity from the main
         # backend. The transport must listen for that exact publisher.
         self._browser_identity = participant_identity
         self._browser_credentials_payload: dict[str, str] | None = None
         self._opening_instruction = opening_instruction
-        self._opening_started = False
+        self._opening_started = opening_delivered
         self._wire_events()
         if persona_config:
             self.persona_manager.register_persona(PersonaConfig.from_dict(persona_config))
@@ -164,6 +169,7 @@ class VoiceUiController:
                     await stop_vad_call(self._app)
                 self._publish("error", {"message": "Voice pipeline failed to start"})
                 self._app = build_vad_application(room_name=self._room_name, call_id=self._call_id)
+                self._wired_app_id = None
                 self.persona_manager.select_persona(self._selected_persona_id)
                 self._wire_events()
                 self._publish_status()
@@ -171,6 +177,7 @@ class VoiceUiController:
 
             self._running = True
             self._has_started = True
+            await self._hydrate_call_context()
             self._publish("lifecycle", {"state": "started"})
             self._publish_status()
             self._status_task = asyncio.create_task(
@@ -187,14 +194,32 @@ class VoiceUiController:
         await asyncio.sleep(0.5)
         if not self._running or not self._opening_instruction:
             return
-        event = TranscriptEvent(
-            call_id=self.session_manager.status.call_id or "pending-call", turn_id=0,
-            speaker="customer",
-            text=f"Start the outbound call now. Follow this approved opening instruction exactly in meaning: {self._opening_instruction}",
-            is_final=True, confidence=1.0,
-            timestamp_start=datetime.now(timezone.utc), timestamp_end=datetime.now(timezone.utc),
+        await self.response_service.generate_opening_instruction(
+            self._opening_instruction,
+            self.session_manager.status.call_id or self._call_id or "pending-call",
         )
-        await self.response_service.handle_transcript_event(event)
+
+    async def _hydrate_call_context(self) -> None:
+        """Restore short history on worker restart without replaying old audio."""
+        if not self._call_id or not self.settings.echoai_internal_voice_secret:
+            return
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=4) as client:
+                response = await client.get(
+                    f"{self.settings.echoai_backend_url}/api/voice/sessions/internal/{self._call_id}/context",
+                    headers={"X-EchoAI-Voice-Secret": self.settings.echoai_internal_voice_secret},
+                )
+                response.raise_for_status()
+                context = response.json()
+                self.response_service.hydrate_history(context.get("history", []))
+                if context.get("opening_delivered"):
+                    self._opening_started = True
+                self._publish("script_context", context)
+        except Exception:
+            # History hydration is a resilience aid.  Do not prevent a valid
+            # real-time audio session from starting when the backend is briefly unavailable.
+            self._publish("error", {"message": "Unable to hydrate live call history"})
 
     async def _recover_stale_call(self) -> None:
         """Release a dead call and rebuild the per-call pipeline components."""
@@ -209,8 +234,13 @@ class VoiceUiController:
             await stop_vad_call(self._app)
         self._running = False
         self._app = build_vad_application(room_name=self._room_name, call_id=self._call_id)
+        self._wired_app_id = None
         self.persona_manager.select_persona(self._selected_persona_id)
         self._tts_started_turns.clear()
+        self._generated_responses.clear()
+        self._persisted_ai_turns.clear()
+        self._tts_completed_turns.clear()
+        self._published_final_transcripts.clear()
         self._wire_events()
         self._publish("lifecycle", {"state": "recovered"})
         self._publish_status()
@@ -268,7 +298,11 @@ class VoiceUiController:
         return [event for event in self._event_log if event["id"] > after]
 
     def _wire_events(self) -> None:
+        if self._wired_app_id == id(self._app):
+            return
+        self._wired_app_id = id(self._app)
         self.transcript_bus.subscribe(self._on_transcript)
+        self.response_service.set_context_provider(self._fetch_script_context)
         self.response_service.subscribe(self._on_response)
         self.response_service.subscribe_stream(self._on_response_chunk)
         self.persona_manager.subscribe(self._on_persona)
@@ -276,10 +310,60 @@ class VoiceUiController:
         self._app.base.audio_sink.subscribe(self._on_tts_audio)
 
     def _on_transcript(self, event: TranscriptEvent) -> None:
+        if event.is_final:
+            key = (event.call_id, event.turn_id)
+            if key in self._published_final_transcripts:
+                return
+            self._published_final_transcripts.add(key)
         self._publish("transcript", event.model_dump())
+    async def _fetch_script_context(self, event: TranscriptEvent) -> dict[str, Any] | None:
+        """Send only final STT text to EchoAI's authenticated 3B boundary."""
+        if not self.settings.echoai_internal_voice_secret:
+            logger.warning("event=campaign_context_unavailable call_id=%s reason=missing_worker_secret", self._call_id)
+            return None
+        import httpx
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=4) as client:
+                    response = await client.post(
+                        f"{self.settings.echoai_backend_url}/api/voice/sessions/internal/{self._call_id}/customer-turn",
+                        json={"text": event.text, "turn_id": event.turn_id},
+                        headers={"X-EchoAI-Voice-Secret": self.settings.echoai_internal_voice_secret},
+                    )
+                    response.raise_for_status()
+                    context = response.json()
+                    self._publish("script_context", context)
+                    return context
+            except (httpx.HTTPError, ValueError, TypeError):
+                logger.warning(
+                    "event=campaign_context_request_failed call_id=%s attempt=%s",
+                    self._call_id, attempt + 1,
+                )
+        self._publish("error", {"message": "Unable to access approved campaign context"})
+        return None
 
     def _on_response(self, event: GeneratedResponseEvent) -> None:
         self._publish("response", event.model_dump())
+        key = (event.call_id, event.turn_id)
+        # Streaming TTS emits its final audio marker before the response event
+        # is emitted. Persist here when that delivery marker has already
+        # arrived; otherwise _on_tts_audio will persist it later.
+        if key in self._tts_completed_turns:
+            self._persisted_ai_turns.add(key)
+            asyncio.create_task(self._persist_ai_turn(event))
+        else:
+            self._generated_responses[key] = event
+
+    async def _persist_ai_turn(self, event: GeneratedResponseEvent) -> None:
+        if not self.settings.echoai_internal_voice_secret or not self._call_id:
+            return
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=4) as client:
+                response = await client.post(f"{self.settings.echoai_backend_url}/api/voice/sessions/internal/{self._call_id}/ai-turn", json={"text": event.text, "turn_id": str(event.turn_id)}, headers={"X-EchoAI-Voice-Secret": self.settings.echoai_internal_voice_secret})
+                response.raise_for_status()
+        except Exception:
+            self._publish("error", {"message": "Unable to persist completed AI turn"})
 
     def _on_response_chunk(self, event: GeneratedResponseChunkEvent) -> None:
         self._publish(
@@ -329,6 +413,8 @@ class VoiceUiController:
     def _on_tts_audio(self, chunk: TtsAudioChunk) -> None:
         turn_key = (chunk.call_id, chunk.turn_id)
         if chunk.is_interruption:
+            self._generated_responses.pop(turn_key, None)
+            self._tts_completed_turns.discard(turn_key)
             self._publish("barge_in", {"state": "interrupted"})
             self._publish_status()
             return
@@ -340,10 +426,15 @@ class VoiceUiController:
             )
             self._publish_status()
         if chunk.is_final:
+            self._tts_completed_turns.add(turn_key)
             self._publish(
                 "tts",
                 {"state": "audio_completed", "call_id": chunk.call_id, "turn_id": chunk.turn_id},
             )
+            response = self._generated_responses.pop(turn_key, None)
+            if response and turn_key not in self._persisted_ai_turns:
+                self._persisted_ai_turns.add(turn_key)
+                asyncio.create_task(self._persist_ai_turn(response))
 
     async def _watch_status(self) -> None:
         previous: tuple[str, str, str] | None = None

@@ -87,6 +87,8 @@ class DeepgramStreamingSttProvider:
     _confirmed_speech_notified: bool = field(default=False, init=False)
     _pre_roll_audio: bytearray = field(default_factory=bytearray, init=False)
     _turn_audio: bytearray = field(default_factory=bytearray, init=False)
+    _published_final_turns: set[tuple[str, int]] = field(default_factory=set, init=False)
+    _pending_fallback_turns: set[tuple[str, int]] = field(default_factory=set, init=False)
 
     def __post_init__(self) -> None:
         self._audio_queue = asyncio.Queue()
@@ -214,7 +216,7 @@ class DeepgramStreamingSttProvider:
 
         if event.is_final:
             self._record_latency(LatencyCheckpointName.STT_FINAL_RECEIVED)
-            await self._publish_final_or_schedule_fallback(event)
+            await self._publish_final_once(event)
             self._complete_turn()
         else:
             self._last_text = transcript
@@ -228,16 +230,25 @@ class DeepgramStreamingSttProvider:
             )
             await self.transcript_bus.publish(event)
 
-    async def _publish_final_or_schedule_fallback(self, event: TranscriptEvent) -> None:
+    async def _publish_final_once(self, event: TranscriptEvent, *, verified: bool = False) -> None:
         """Publish a trusted final turn, or verify a doubtful one asynchronously."""
 
+        key = (event.call_id, event.turn_id)
+        if key in self._published_final_turns or key in self._pending_fallback_turns:
+            logger.info("event=duplicate_stt_final_ignored call_id=%s turn_id=%s", event.call_id, event.turn_id)
+            return
+
         if (
+            not verified
+            and
             event.confidence < self.settings.low_confidence_threshold
             and self.fallback_service is not None
             and self._turn_audio
         ):
+            self._pending_fallback_turns.add(key)
             self._schedule_fallback_if_needed(event)
             return
+        self._published_final_turns.add(key)
         await self.transcript_bus.publish(event)
 
     @staticmethod
@@ -377,7 +388,10 @@ class DeepgramStreamingSttProvider:
             # final transcript to the LLM. Whisper will publish a verified final
             # event for that turn without blocking the live audio receive loop.
             if not low_confidence_final:
-                await self.transcript_bus.publish(event)
+                if is_final:
+                    await self._publish_final_once(event)
+                else:
+                    await self.transcript_bus.publish(event)
 
         if is_final and event is not None:
             self._schedule_fallback_if_needed(event)
@@ -404,7 +418,7 @@ class DeepgramStreamingSttProvider:
         ):
             self._schedule_fallback_if_needed(event)
         else:
-            await self.transcript_bus.publish(event)
+            await self._publish_final_once(event)
         self._complete_turn()
 
     def _complete_turn(self) -> None:
@@ -446,20 +460,19 @@ class DeepgramStreamingSttProvider:
             logger.warning("Whisper returned an empty fallback transcript for turn=%s", result.turn_id)
             return
         now = datetime.now(timezone.utc)
-        await self.transcript_bus.publish(
+        self._pending_fallback_turns.discard((result.call_id, result.turn_id))
+        await self._publish_final_once(
             TranscriptEvent(
                 call_id=result.call_id,
                 turn_id=result.turn_id,
                 speaker="customer",
                 text=text,
                 is_final=True,
-                confidence=max(
-                    result.primary_confidence,
-                    self.settings.low_confidence_threshold,
-                ),
+                confidence=max(result.primary_confidence, self.settings.low_confidence_threshold),
                 timestamp_start=now,
                 timestamp_end=now,
-            )
+            ),
+            verified=True,
         )
 
     def _begin_turn(self) -> None:

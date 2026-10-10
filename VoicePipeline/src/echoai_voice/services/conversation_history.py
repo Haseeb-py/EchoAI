@@ -32,3 +32,8 @@ class ConversationHistoryStore:
         """Reset the history for a fresh call."""
 
         self._turns.clear()
+
+    def replace(self, turns: list[ConversationTurn]) -> None:
+        """Hydrate a restarted call from its trusted persisted transcript."""
+
+        self._turns[:] = turns

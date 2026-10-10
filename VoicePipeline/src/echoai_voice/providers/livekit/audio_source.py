@@ -27,7 +27,8 @@ class AudioSource:
     def subscribe(self, callback: callable[[AudioFrameChunk], None]) -> None:
         """Register a callback for inbound microphone frames."""
 
-        self._subscribers.append(callback)
+        if callback not in self._subscribers:
+            self._subscribers.append(callback)
 
     def unsubscribe(self, callback: callable[[AudioFrameChunk], None]) -> None:
         """Remove a previously registered inbound audio callback."""

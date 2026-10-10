@@ -2,7 +2,10 @@
 
 import csv
 import json
-from datetime import datetime
+import re
+import logging
+import httpx
+from datetime import datetime, timedelta
 from io import StringIO
 from uuid import uuid4
 
@@ -13,11 +16,14 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db, require_admin
 from app.models.campaign import Campaign
 from app.models.operations import Call, CallState, CallTurn, EscalationAlert, EscalationEvent, KnowledgeEntry, Lead, ObjectionEntry, SupervisorMessage
+from app.models.voice_session import VoiceSession
 from app.models.script import Script
 from app.models.user import User
 from app.models.system_setting import SystemSetting
 from app.api.routes.system_settings import SETTING_ID
 from app.core.time import utcnow
+from app.core.config import settings
+from app.services.live_call_flow import script_nodes, transition_customer_stage
 from app.schemas.operations import (
     CallAnalysisPrompt,
     CallComplete,
@@ -36,6 +42,7 @@ from app.schemas.operations import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 admin_router = APIRouter(prefix="/scripts/{script_id}/objections")
 
 HUMAN_REQUEST_TERMS = ("human", "supervisor", "real person", "agent please")
@@ -100,7 +107,7 @@ def _match_objection(db: Session, script_id: str | None, node_id: str | None, te
 
 def _retrieve_knowledge(db: Session, campaign_id: str, query: str, limit: int = 4) -> list[dict]:
     """Return published campaign material before global material for prompt grounding."""
-    terms = {term for term in query.lower().split() if len(term) > 2}
+    terms = {term for term in re.findall(r"[a-z0-9]+", query.lower()) if len(term) > 2}
     entries = (
         db.query(KnowledgeEntry)
         .filter(KnowledgeEntry.status == "published")
@@ -268,8 +275,9 @@ def create_call(payload: CallCreate, db: Session = Depends(get_db), user: User =
             raise HTTPException(status_code=404, detail="Lead not found for this campaign")
         if user.role == "agent" and lead.assigned_agent_id != user.id:
             raise HTTPException(status_code=403, detail="You can only call leads assigned to you")
-        if db.query(Call).filter(Call.lead_id == lead.id, Call.status == "active").first():
-            raise HTTPException(status_code=409, detail="This lead already has an active call")
+        existing_call = db.query(Call).filter(Call.lead_id == lead.id, Call.status == "active").first()
+        if existing_call:
+            raise HTTPException(status_code=409, detail=f"This lead already has an active call ({existing_call.id}). Complete or disconnect that call before starting another.")
     nodes = _campaign_script_nodes(db, campaign)
     call = Call(
         id=str(uuid4()), campaign_id=campaign.id, lead_id=payload.lead_id,
@@ -278,7 +286,44 @@ def create_call(payload: CallCreate, db: Session = Depends(get_db), user: User =
     state = CallState(call_id=call.id, current_node_id=nodes[0].get("id") if nodes else None)
     db.add_all([call, state])
     db.commit()
+    logger.info("event=call_created call_id=%s campaign_id=%s agent_id=%s initial_node_id=%s", call.id, call.campaign_id, call.agent_id, state.current_node_id)
     return {"id": call.id, "campaign_id": call.campaign_id, "current_node_id": state.current_node_id, "status": call.status}
+
+
+@router.post("/calls/{call_id}/recover-orphan")
+def recover_orphaned_call(call_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Terminalize only a call already proven ended at the voice-session boundary."""
+    call = db.query(Call).filter(Call.id == call_id).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    _require_call_write_access(call, user)
+    if call.status != "active":
+        return {"id": call.id, "status": call.status, "recovered": False}
+    session = db.query(VoiceSession).filter(VoiceSession.call_id == call.id).first()
+    no_session_stale = (
+        session is None
+        and call.started_at <= utcnow() - timedelta(minutes=15)
+        and not db.query(CallTurn).filter(CallTurn.call_id == call.id).first()
+    )
+    worker_missing = False
+    if session and session.status == "active" and settings.voice_worker_url:
+        try:
+            response = httpx.get(
+                f"{settings.voice_worker_url}/api/internal/sessions/{call.id}/live",
+                headers={"X-EchoAI-Voice-Secret": settings.voice_worker_secret}, timeout=4,
+            )
+            worker_missing = response.status_code == 404
+        except httpx.HTTPError:
+            worker_missing = False
+    if not no_session_stale and not worker_missing and (not session or session.status not in {"ended", "worker_failed"}):
+        raise HTTPException(status_code=409, detail="The call may still be live and cannot be recovered automatically")
+    call.status = "disconnected"
+    call.completed_at = utcnow()
+    if session:
+        session.status = "ended"
+        session.ended_at = call.completed_at
+    db.commit()
+    return {"id": call.id, "status": call.status, "recovered": True}
 
 
 @router.post("/calls/{call_id}/turns", response_model=TurnResponse)
@@ -300,19 +345,17 @@ def ingest_turn(call_id: str, payload: TurnCreate, db: Session = Depends(get_db)
         raise HTTPException(status_code=409, detail="Turn sequence must continue from the latest recorded turn")
     if not previous_turn and payload.sequence not in {0, 1}:
         raise HTTPException(status_code=422, detail="The first turn sequence must be 0 or 1")
-    nodes = _campaign_script_nodes(db, campaign) if campaign else []
+    nodes = script_nodes(campaign, db) if campaign else []
     db.add(CallTurn(id=str(uuid4()), call_id=call_id, sequence=payload.sequence, speaker=payload.speaker,
                     transcript=payload.transcript, occurred_at=payload.occurred_at or utcnow()))
     memory = json.loads(state.recent_memory_json or "[]")
     memory.append({"speaker": payload.speaker, "text": payload.transcript})
     state.recent_memory_json = json.dumps(memory[-8:])
-    current_index = next((index for index, node in enumerate(nodes) if node.get("id") == state.current_node_id), 0)
-    if payload.speaker == "customer" and nodes and current_index < len(nodes) - 1:
-        completed = json.loads(state.completed_node_ids_json or "[]")
-        if state.current_node_id and state.current_node_id not in completed:
-            completed.append(state.current_node_id)
-        state.completed_node_ids_json = json.dumps(completed)
-        state.current_node_id = nodes[current_index + 1].get("id")
+    if payload.speaker == "customer":
+        # A customer turn is not itself a stage completion.  The shared
+        # evaluator advances only when conservative evidence satisfies the
+        # current frozen-script goal and uses declared graph edges.
+        transition_customer_stage(db, call, payload.transcript)
     objection = _match_objection(db, campaign.script_id if campaign else None, state.current_node_id, payload.transcript)
     if objection and payload.speaker == "customer":
         state.unresolved_objections += 1
@@ -490,7 +533,7 @@ def list_calls(status_filter: str | None = None, campaign_id: str | None = None,
     elif user.role not in {"admin", "supervisor"}:
         raise HTTPException(status_code=403, detail="Call access is not available for this role")
     if status_filter:
-        query = query.filter(Call.status == status_filter)
+        query = query.filter(Call.status.in_(["completed", "disconnected"]) if status_filter == "terminal" else Call.status == status_filter)
     if campaign_id:
         query = query.filter(Call.campaign_id == campaign_id)
     calls = query.order_by(Call.completed_at.desc(), Call.started_at.desc()).all()

@@ -41,6 +41,8 @@ class AppSettings:
     persona_dir: Path
     low_confidence_threshold: float
     log_level: str
+    echoai_backend_url: str
+    echoai_internal_voice_secret: str
 
 
 def _get_project_root() -> Path:
@@ -69,4 +71,6 @@ def get_settings() -> AppSettings:
         persona_dir=Path(os.getenv("PERSONA_DIR", str(project_root / "config" / "personas"))),
         low_confidence_threshold=float(os.getenv("LOW_CONFIDENCE_THRESHOLD", "0.72")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        echoai_backend_url=os.getenv("ECHOAI_BACKEND_URL", "http://127.0.0.1:8000").rstrip("/"),
+        echoai_internal_voice_secret=os.getenv("ECHOAI_INTERNAL_VOICE_SECRET", ""),
     )

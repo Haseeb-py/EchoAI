@@ -12,6 +12,7 @@ from app.models import preference as preference_model  # noqa: F401
 from app.models import security as security_model  # noqa: F401
 from app.models import system_setting as system_setting_model  # noqa: F401
 from app.models import voice_session as voice_session_model  # noqa: F401
+from app.models import voice_turn_receipt as voice_turn_receipt_model  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from echoai_voice.ui.controller import VoiceUiController
 STATIC_DIR = Path(__file__).with_name("static")
 controller = VoiceUiController()
 managed_controllers: dict[str, VoiceUiController] = {}
+logger = logging.getLogger(__name__)
+WORKER_API_VERSION = "module-3b-context-v1"
 
 
 class PersonaSelection(BaseModel):
@@ -31,6 +34,7 @@ class ManagedSessionStart(BaseModel):
     persona_id: str | None = None
     persona: dict[str, object] | None = None
     opening_instruction: str | None = None
+    opening_delivered: bool = False
 
 
 @asynccontextmanager
@@ -112,11 +116,22 @@ def _require_internal_secret(value: str | None) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal voice-service credential")
 
 
+@app.get("/api/internal/capabilities")
+async def capabilities(x_echoai_voice_secret: str | None = Header(default=None)) -> dict[str, object]:
+    """Prove this worker supports EchoAI's campaign-context contract."""
+    _require_internal_secret(x_echoai_voice_secret)
+    return {
+        "worker_api_version": WORKER_API_VERSION,
+        "features": ["campaign-context", "audio-complete-ai-persistence", "reconnect-hydration"],
+    }
+
+
 @app.post("/api/internal/sessions/start")
 async def start_managed_session(payload: ManagedSessionStart, x_echoai_voice_secret: str | None = Header(default=None)) -> dict[str, object]:
     """Start one isolated Module 3A worker in EchoAI's call-specific room."""
 
     _require_internal_secret(x_echoai_voice_secret)
+    logger.info("event=managed_session_start call_id=%s room_name=%s persona_id=%s opening_delivered=%s", payload.call_id, payload.room_name, payload.persona_id, payload.opening_delivered)
     existing = managed_controllers.get(payload.call_id)
     if existing and existing.is_running:
         return existing.snapshot()
@@ -128,6 +143,7 @@ async def start_managed_session(payload: ManagedSessionStart, x_echoai_voice_sec
         participant_identity=payload.participant_identity,
         persona_config=payload.persona,
         opening_instruction=payload.opening_instruction,
+        opening_delivered=payload.opening_delivered,
     )
     if payload.persona_id:
         try:

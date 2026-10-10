@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from collections.abc import Callable
 
 from echoai_voice.core.livekit_app import LiveKitVoiceApplication, build_livekit_application
 from echoai_voice.providers.deepgram.stt_provider import DeepgramStreamingSttProvider
@@ -22,6 +23,7 @@ class SttVoiceApplication:
     transcript_bus: TranscriptEventBus
     stt_provider: DeepgramStreamingSttProvider
     fallback_service: WhisperFallbackService
+    audio_callback: Callable[[object], None] | None = None
 
 
 def build_stt_application(room_name: str = "echoai-test-room", call_id: str | None = None) -> SttVoiceApplication:
@@ -57,7 +59,11 @@ async def start_stt_call(app: SttVoiceApplication) -> None:
     app.stt_provider.bind_call_id(app.base.livekit.status.call_id)
     await app.stt_provider.start()
     app.base.livekit.mark_listening()
-    app.base.audio_source.subscribe(lambda chunk: _schedule_audio_push(app, chunk))
+    if app.audio_callback is None:
+        def forward_audio(chunk: object) -> None:
+            _schedule_audio_push(app, chunk)
+        app.audio_callback = forward_audio
+        app.base.audio_source.subscribe(forward_audio)
     logger.info("Phase 3 STT call started")
 
 
@@ -66,6 +72,9 @@ async def stop_stt_call(app: SttVoiceApplication) -> None:
 
     await app.stt_provider.stop()
     await app.fallback_service.cancel_all()
+    if app.audio_callback is not None:
+        app.base.audio_source.unsubscribe(app.audio_callback)
+        app.audio_callback = None
     await app.base.livekit.disconnect()
 
 
