@@ -14,9 +14,38 @@ from app.services.voice_adapter import VoiceProviderError, analyze_call, generat
 from app.core.time import utcnow
 from app.core.config import settings
 from app.models.voice_session import VoiceSession
+from app.services.cognitive_intelligence import aggregate_call_experience
+from app.services.sales_intelligence import aggregate_call_sales_intelligence
 import httpx
 
 router = APIRouter(prefix="/voice")
+
+
+def _has_post_call_analysis(call: Call) -> bool:
+    try:
+        analysis = __import__("json").loads(call.analysis_json or "{}")
+    except (TypeError, ValueError):
+        return False
+    return isinstance(analysis, dict) and bool(analysis.get("summary"))
+
+
+def _fallback_analysis_from_cognitive(db: Session, call: Call) -> dict:
+    """Keep terminal records useful when external narrative analysis is down."""
+    experience = aggregate_call_experience(db, call)
+    aggregate_call_sales_intelligence(db, call)
+    return {
+        "summary": "Call completed; automated narrative analysis was unavailable.",
+        "analysis_status": "unavailable",
+        "start_sentiment": experience.start_sentiment,
+        "end_sentiment": experience.end_sentiment,
+        "overall_sentiment": experience.overall_sentiment,
+        "intent": experience.primary_intent,
+        "outcome": "completed",
+        "toxic_language": [],
+        "objections": [],
+        "extracted_lead_details": {"contact_details": [], "stated_needs": [], "timeline": "", "budget_context": "", "decision_maker_context": ""},
+        "follow_up_recommendation": "",
+    }
 
 
 async def _process_customer_turn(call_id: str, campaign_id: str, sequence: int, transcript: str, db: Session, user) -> dict:
@@ -65,27 +94,28 @@ async def complete_analysis(call_id: str, db: Session = Depends(get_db), user=De
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
     _require_call_write_access(call, user)
-    if call.status == "completed":
+    if call.status == "completed" and _has_post_call_analysis(call):
         return {"id": call.id, "status": call.status, "analysis": __import__("json").loads(call.analysis_json or "{}")}
-    if call.status != "active":
-        raise HTTPException(status_code=409, detail="Only active calls can be analyzed and completed")
+    if call.status not in {"active", "completed"}:
+        raise HTTPException(status_code=409, detail="Only active or completed calls can be analyzed")
     turns = db.query(CallTurn).filter(CallTurn.call_id == call_id).order_by(CallTurn.sequence).all()
     transcript = [{"speaker": turn.speaker, "transcript": turn.transcript} for turn in turns]
     # Terminal database state is authoritative and must not depend on Groq,
     # LiveKit, or worker cleanup succeeding afterwards.
-    call.status = "completed"
-    call.completed_at = utcnow()
-    session = db.query(VoiceSession).filter(VoiceSession.call_id == call_id).first()
-    if session:
-        session.status = "ended"
-        session.ended_at = call.completed_at
-    db.commit()
+    if call.status == "active":
+        call.status = "completed"
+        call.completed_at = utcnow()
+        session = db.query(VoiceSession).filter(VoiceSession.call_id == call_id).first()
+        if session:
+            session.status = "ended"
+            session.ended_at = call.completed_at
+        db.commit()
     try:
         analysis = await analyze_call(_analysis_prompt(call_id, transcript))
-    except VoiceProviderError:
+    except (VoiceProviderError, httpx.HTTPError):
         # Analysis is optional post-call enrichment. A provider outage must not
         # leave the call active and prevent the agent starting the next call.
-        analysis = {"outcome": "completed", "summary": "Call completed; automated analysis was unavailable.", "follow_up_recommendation": ""}
+        analysis = _fallback_analysis_from_cognitive(db, call)
     payload = CallComplete(
         outcome=str(analysis.get("outcome", "completed")), summary=str(analysis.get("summary", "")),
         analysis=analysis, follow_up_recommendation=str(analysis.get("follow_up_recommendation", "")),
@@ -101,6 +131,8 @@ async def complete_analysis(call_id: str, db: Session = Depends(get_db), user=De
             lead.summary = payload.summary
             lead.status = "converted" if payload.outcome.lower() in {"converted", "conversion", "won"} else "follow_up"
     db.commit()
+    aggregate_call_experience(db, call)
+    aggregate_call_sales_intelligence(db, call)
     # Cleanup is best effort only; terminal state was already committed above.
     if settings.voice_worker_url:
         try:

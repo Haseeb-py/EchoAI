@@ -137,9 +137,10 @@ function parsePlainTextNodes(content: string): ScriptNode[] | null {
   // the author's sections as prompts instead of silently saving those defaults.
   const sections = content.split(/\n\s*\n+/).map((value) => value.trim()).filter(Boolean);
   if (sections.length < 2) return null;
+  const spokenOpening = sections.findIndex((section) => /^(?:hello|hi|good\s+(?:morning|afternoon|evening))\b/i.test(section.replace(/^#+\s*/, "").trim()));
   return sections.map((prompt, index) => ({
     id: `uploaded_${index + 1}`,
-    type: index === 0 ? "opening" : index === sections.length - 1 ? "closing" : "discovery",
+    type: index === (spokenOpening >= 0 ? spokenOpening : 0) ? "opening" : index === sections.length - 1 ? "closing" : "discovery",
     goal: prompt.split(/[.!?\n]/)[0].trim() || `Complete uploaded section ${index + 1}`,
     prompt,
     next_node_ids: index < sections.length - 1 ? [`uploaded_${index + 2}`] : [],

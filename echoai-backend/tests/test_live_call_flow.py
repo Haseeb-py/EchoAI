@@ -24,6 +24,7 @@ from app.api.routes.voice_sessions import _start_worker, end_voice_session, get_
 from app.api.routes.voice import complete_analysis
 from app.api.routes.operations import recover_orphaned_call
 from app.services.voice_adapter import VoiceProviderError
+from app.core.time import utcnow
 NODES = [
     {"id": "opening", "type": "opening", "goal": "Introduce the call", "prompt": "Introduce.", "next_node_ids": ["discovery"]},
     {"id": "discovery", "type": "discovery", "goal": "Understand current workflow", "prompt": "Ask workflow.", "next_node_ids": ["pitch", "follow_up"]},
@@ -136,7 +137,7 @@ class LiveCallFlowTests(unittest.TestCase):
         response.raise_for_status = Mock()
         capability = Mock()
         capability.raise_for_status = Mock()
-        capability.json.return_value = {"worker_api_version": "module-3b-context-v1"}
+        capability.json.return_value = {"worker_api_version": "module-5-sales-context-v1"}
         with patch("app.api.routes.voice_sessions.settings", SimpleNamespace(voice_worker_url="http://worker", voice_worker_secret="secret")), \
              patch("app.api.routes.voice_sessions.httpx.get", return_value=capability), \
              patch("app.api.routes.voice_sessions.httpx.post", return_value=response) as post:
@@ -145,6 +146,34 @@ class LiveCallFlowTests(unittest.TestCase):
         self.assertEqual(sent["id"], "persona-frozen")
         self.assertIn("Friendly pilot", sent["system_prompt"])
         self.assertIn("warm", sent["system_prompt"])
+
+    def test_outbound_opening_resolves_case_insensitive_name_placeholder(self):
+        self.campaign.call_direction = "outbound"
+        self.campaign.persona_snapshot_json = json.dumps({"display_name": "Frozen Agent", "tone": "warm"})
+        self.campaign.script_snapshot_json = json.dumps({"content": json.dumps({"nodes": [{"id": "opening", "type": "opening", "prompt": "Hello, this is [Your name] from EchoAI."}]})})
+        session = VoiceSession(id=str(uuid4()), call_id=self.call.id, room_name="room", participant_identity="agent")
+        self.db.add(session); self.db.commit()
+        response = Mock(); response.raise_for_status = Mock(); capability = Mock(); capability.raise_for_status = Mock(); capability.json.return_value = {"worker_api_version": "module-5-sales-context-v1"}
+        with patch("app.api.routes.voice_sessions.settings", SimpleNamespace(voice_worker_url="http://worker", voice_worker_secret="secret")), patch("app.api.routes.voice_sessions.httpx.get", return_value=capability), patch("app.api.routes.voice_sessions.httpx.post", return_value=response) as post:
+            _start_worker(self.call, session, self.db)
+        opening = post.call_args.kwargs["json"]["opening_instruction"]
+        self.assertIn("Frozen Agent", opening)
+        self.assertNotIn("[Your", opening)
+
+    def test_heading_opening_uses_first_spoken_greeting_from_frozen_snapshot(self):
+        self.campaign.call_direction = "outbound"
+        self.campaign.persona_snapshot_json = json.dumps({"name": "Sarah", "tone": "warm"})
+        nodes = [
+            {"id": "uploaded_1", "type": "opening", "prompt": "# GrowthBridge Digital", "goal": "Title"},
+            {"id": "uploaded_2", "type": "discovery", "prompt": "Hello, this is [Name] from GrowthBridge.", "goal": "Greeting"},
+        ]
+        self.campaign.script_snapshot_json = json.dumps({"content": json.dumps({"nodes": nodes})})
+        session = VoiceSession(id=str(uuid4()), call_id=self.call.id, room_name="room", participant_identity="agent")
+        self.db.add(session); self.db.commit()
+        response = Mock(); response.raise_for_status = Mock(); capability = Mock(); capability.raise_for_status = Mock(); capability.json.return_value = {"worker_api_version": "module-5-sales-context-v1"}
+        with patch("app.api.routes.voice_sessions.settings", SimpleNamespace(voice_worker_url="http://worker", voice_worker_secret="secret")), patch("app.api.routes.voice_sessions.httpx.get", return_value=capability), patch("app.api.routes.voice_sessions.httpx.post", return_value=response) as post:
+            _start_worker(self.call, session, self.db)
+        self.assertEqual(post.call_args.kwargs["json"]["opening_instruction"], "Hello, this is Sarah from GrowthBridge.")
 
     def test_confirmed_worker_start_failure_closes_call_and_session(self):
         self.call.agent_id = "agent-1"
@@ -204,6 +233,31 @@ class LiveCallFlowTests(unittest.TestCase):
         self.assertEqual(self.db.get(Call, self.call.id).status, "completed")
         self.assertIsNotNone(self.db.get(Call, self.call.id).completed_at)
         self.assertEqual(self.db.get(VoiceSession, session.id).status, "ended")
+        fallback = json.loads(self.db.get(Call, self.call.id).analysis_json)
+        self.assertEqual(fallback["analysis_status"], "unavailable")
+        self.assertIn(fallback["overall_sentiment"], {"positive", "neutral", "negative", "unknown"})
+
+    def test_completed_call_without_analysis_can_be_enriched_without_reopening_it(self):
+        self.call.agent_id = "agent-1"
+        self.call.status = "completed"
+        self.call.completed_at = utcnow()
+        self.call.analysis_json = "{}"
+        self.db.commit()
+        user = SimpleNamespace(role="agent", id="agent-1")
+        analysis = {
+            "summary": "Customer described a service issue.", "start_sentiment": "neutral",
+            "end_sentiment": "negative", "overall_sentiment": "negative", "intent": "support_request",
+            "outcome": "follow_up", "toxic_language": [], "objections": [],
+            "extracted_lead_details": {"contact_details": [], "stated_needs": [], "timeline": "", "budget_context": "", "decision_maker_context": ""},
+            "follow_up_recommendation": "Use the approved support process.",
+        }
+        with patch("app.api.routes.voice.analyze_call", new=AsyncMock(return_value=analysis)), \
+             patch("app.api.routes.voice.settings", SimpleNamespace(voice_worker_url="", voice_worker_secret="")):
+            result = asyncio.run(complete_analysis(self.call.id, self.db, user))
+        stored = self.db.get(Call, self.call.id)
+        self.assertEqual(result["analysis"]["summary"], analysis["summary"])
+        self.assertEqual(stored.status, "completed")
+        self.assertEqual(json.loads(stored.analysis_json)["summary"], analysis["summary"])
 
     def test_confirmed_missing_worker_session_can_be_safely_recovered(self):
         self.call.agent_id = "agent-1"

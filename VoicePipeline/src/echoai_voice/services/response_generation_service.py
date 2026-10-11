@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from contextlib import suppress
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -23,6 +24,14 @@ logger = logging.getLogger(__name__)
 ResponseSubscriber = Callable[[GeneratedResponseEvent], Awaitable[None] | None]
 ResponseChunkSubscriber = Callable[[GeneratedResponseChunkEvent], Awaitable[None] | None]
 ContextProvider = Callable[[TranscriptEvent], Awaitable[dict[str, Any] | None]]
+
+
+def resolve_agent_name_placeholders(text: str, display_name: str) -> str:
+    """Resolve only authoring placeholders that explicitly mean agent name."""
+    # Supports [Name], [Your Name], case variants, {name}, {agent_name},
+    # {{name}}, and {{agentName}} without touching unrelated placeholders.
+    text = re.sub(r"\[\s*(?:your\s+)?name\s*\]", display_name, text, flags=re.I)
+    return re.sub(r"\{\{?\s*(?:agent[_\s-]*)?name\s*\}?\}", display_name, text, flags=re.I)
 
 
 @dataclass(slots=True)
@@ -160,6 +169,10 @@ class ResponseGenerationService:
         used to persist an invented transcript and could move the script.
         """
 
+        # Last trust boundary before the generated opening is streamed to TTS:
+        # sanitize authoring placeholders using the active frozen persona.
+        name = self.persona_manager.get_active_persona().display_name
+        instruction = resolve_agent_name_placeholders(instruction, name)
         if call_id in self._opening_calls:
             logger.info("event=duplicate_opening_ignored call_id=%s", call_id)
             return
@@ -224,7 +237,9 @@ class ResponseGenerationService:
         # backend context was persisted and returned.  Never fall back to an
         # ungrounded generic persona when that boundary is unavailable.
         if fetch_context and self._context_provider and context is None:
-            await self._emit_safe_recovery(event, generation)
+            # Context is the campaign trust boundary. A backend failure must
+            # remain visible instead of being disguised as a generic response.
+            logger.warning("event=response_skipped_missing_campaign_context call_id=%s turn_id=%s", event.call_id, event.turn_id)
             return
         prior_history = self.history_store.snapshot()
         if context and context.get("history"):
@@ -251,6 +266,12 @@ class ResponseGenerationService:
                 for item in knowledge if isinstance(item, dict)
             )
             objection_guidance = str(context.get("approved_objection_response") or "")
+            cognitive = context.get("cognitive") or {}
+            sales = context.get("sales") or {}
+            stage_prompt = str(stage.get("prompt", "") if stage else "")
+            import re
+            stage_prompt = re.sub(r"\[\s*(?:your\s+)?name\s*\]", persona.display_name, stage_prompt, flags=re.I)
+            stage_prompt = re.sub(r"\{\{?\s*(?:agent[_\s-]*)?name\s*\}?\}", persona.display_name, stage_prompt, flags=re.I)
             campaign_instructions = (
                 "\n\nCAMPAIGN INSTRUCTIONS (higher priority than generic persona wording):\n"
                 f"Campaign product: {campaign.get('product', '') if campaign else ''}\n"
@@ -259,9 +280,18 @@ class ResponseGenerationService:
                 f"Campaign context: {campaign.get('context', '') if campaign else ''}\n"
                 f"Current stage id: {stage.get('id', '') if stage else ''}\n"
                 f"Current stage goal: {stage.get('goal', '') if stage else ''}\n"
-                f"Current stage instruction: {stage.get('prompt', '') if stage else ''}\n"
+                f"Current stage instruction: {stage_prompt}\n"
                 f"Approved knowledge:\n{approved_sources or 'No approved information was retrieved.'}\n"
                 f"Approved objection guidance: {objection_guidance or 'None.'}\n"
+                f"Live customer intent: {cognitive.get('intent', 'unknown')}\n"
+                f"Live customer sentiment: {cognitive.get('sentiment', 'neutral')}\n"
+                f"Live customer emotion: {cognitive.get('emotion', 'unknown')}\n"
+                f"Tone guidance: {cognitive.get('response_guidance', 'Use the campaign persona.')}\n"
+                f"Sales objection type: {sales.get('objection_type', 'none')}\n"
+                f"Buying signal: {sales.get('buying_signal', 'none')}\n"
+                f"Confirmed commitment: {sales.get('commitment_confirmed', False)}\n"
+                f"Sales response strategy: {sales.get('recommended_strategy', 'Use the current approved stage.')}\n"
+                f"Grounded optional suggestions: {sales.get('upsell_suggestions', [])}\n"
                 "Priority rules: answer a direct customer question or instruction first, using only "
                 "approved knowledge and campaign facts, then resume the current stage if appropriate. "
                 "Keep the current stage when answering an unrelated question. Do not invent or imply "
@@ -269,7 +299,9 @@ class ResponseGenerationService:
                 "performance guarantees. If approved information is missing, say briefly that you do not "
                 "have that detail. Do not push email, a portal, or a follow-up when the customer wants to "
                 "discuss the matter on this call. Follow the current stage only after answering the customer. "
-                "Do not advance to another stage until the customer supplies the required information."
+                "Do not advance to another stage until the customer supplies the required information. "
+                "A buying signal is interest, not proof of a completed sale. Never infer a price, discount, "
+                "guarantee, policy, availability, or product fact from sales guidance. Respect any stop-contact request immediately."
             )
         request = ResponseRequest(
             persona_id=persona.id,
@@ -346,7 +378,7 @@ class ResponseGenerationService:
         """Speak a deterministic, non-promissory failure response via normal TTS."""
         if generation != self._generation:
             return
-        text = "I’m sorry, I can’t access the approved campaign details right now. Please try again in a moment."
+        text = "I’m sorry, I’m having trouble responding right now. Please repeat that in a moment."
         persona = self.persona_manager.get_active_persona()
         identity = persona_id or persona.id
         await self._emit_stream(GeneratedResponseChunkEvent(

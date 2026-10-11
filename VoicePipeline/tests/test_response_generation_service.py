@@ -197,6 +197,20 @@ class ResponseGenerationServiceTests(unittest.IsolatedAsyncioTestCase):
         await service.generate_opening_instruction("Introduce the approved offer.", "call-a")
         self.assertEqual(len(generator.requests), 1)
 
+    async def test_opening_placeholder_is_sanitized_at_generation_boundary(self):
+        generator = _Generator()
+        service = ResponseGenerationService(_PersonaManager(), generator)
+        await service.generate_opening_instruction("Hello, this is [Your Name].", "call-placeholder")
+        self.assertNotIn("[Your Name]", generator.requests[0].latest_customer_transcript)
+        self.assertIn("Campaign", generator.requests[0].latest_customer_transcript)
+
+    async def test_bare_name_placeholder_is_sanitized_at_opening_generation_boundary(self):
+        generator = _Generator()
+        service = ResponseGenerationService(_PersonaManager(), generator)
+        await service.generate_opening_instruction("Hello, this is [Name].", "call-bare-name")
+        self.assertNotIn("[Name]", generator.requests[0].latest_customer_transcript)
+        self.assertIn("Campaign", generator.requests[0].latest_customer_transcript)
+
     async def test_context_failure_does_not_call_groq_with_generic_persona(self):
         generator = _Generator()
         service = ResponseGenerationService(_PersonaManager(), generator)
@@ -209,8 +223,7 @@ class ResponseGenerationServiceTests(unittest.IsolatedAsyncioTestCase):
         service.set_context_provider(unavailable)
         await service.handle_transcript_event(_event("What does EchoAI do?", 10))
         self.assertEqual(generator.requests, [])
-        self.assertEqual(len(responses), 1)
-        self.assertIn("approved campaign details", responses[0].text)
+        self.assertEqual(responses, [])
 
     async def test_campaign_prompt_prioritizes_direct_question_and_truthfulness(self):
         generator = _Generator()
@@ -233,6 +246,50 @@ class ResponseGenerationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("EchoAI automates voice sales", prompt)
         self.assertIn("Keep the current stage", prompt)
 
+    async def test_cognitive_context_is_sent_to_groq_as_tone_guidance(self):
+        generator = _Generator()
+        service = ResponseGenerationService(_PersonaManager(), generator)
+
+        async def provider(_):
+            return {
+                "campaign": {"product": "EchoAI"},
+                "current_node": {"id": "discovery", "goal": "Learn needs", "prompt": "Ask."},
+                "history": [],
+                "cognitive": {
+                    "intent": "clarification", "sentiment": "negative", "emotion": "frustrated",
+                    "response_guidance": "Use a concise, patient clarification.",
+                },
+            }
+
+        service.set_context_provider(provider)
+        await service.handle_transcript_event(_event("Can you repeat that?", 111))
+        prompt = generator.requests[0].system_prompt
+        self.assertIn("Live customer intent: clarification", prompt)
+        self.assertIn("Live customer sentiment: negative", prompt)
+        self.assertIn("Tone guidance: Use a concise, patient clarification.", prompt)
+
+    async def test_sales_strategy_is_contextual_and_cannot_replace_campaign_grounding(self):
+        generator = _Generator()
+        service = ResponseGenerationService(_PersonaManager(), generator)
+
+        async def provider(_):
+            return {
+                "campaign": {"product": "Approved product", "goal": "Understand needs"},
+                "current_node": {"id": "discovery", "goal": "Learn needs", "prompt": "Ask one need question."},
+                "history": [],
+                "approved_knowledge": [{"title": "Approved facts", "content": "Only this fact is approved."}],
+                "sales": {"objection_type": "price_budget", "buying_signal": "interest", "commitment_confirmed": False,
+                          "recommended_strategy": "Acknowledge the budget concern without inventing price."},
+            }
+
+        service.set_context_provider(provider)
+        await service.handle_transcript_event(_event("This sounds expensive but I am interested.", 112))
+        prompt = generator.requests[0].system_prompt
+        self.assertIn("Sales objection type: price_budget", prompt)
+        self.assertIn("Sales response strategy: Acknowledge the budget concern", prompt)
+        self.assertIn("Approved facts", prompt)
+        self.assertIn("Never infer a price", prompt)
+
     async def test_groq_failure_emits_safe_reply_and_later_turn_still_works(self):
         generator = _FailsOnceGenerator()
         service = ResponseGenerationService(_PersonaManager(), generator)
@@ -246,5 +303,5 @@ class ResponseGenerationServiceTests(unittest.IsolatedAsyncioTestCase):
         await service.handle_transcript_event(_event("First question", 12))
         await service.handle_transcript_event(_event("Second question", 13))
         self.assertEqual(len(responses), 2)
-        self.assertIn("approved campaign details", responses[0].text)
+        self.assertIn("trouble responding", responses[0].text)
         self.assertEqual(responses[1].text, "recovered reply")

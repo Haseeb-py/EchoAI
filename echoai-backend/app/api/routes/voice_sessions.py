@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 import logging
+import re
 from uuid import uuid4
 
 import httpx
@@ -21,10 +22,27 @@ from app.models.campaign import Campaign
 from app.models.persona import Persona
 from app.models.user import User
 from app.models.voice_session import VoiceSession
+from app.services.cognitive_intelligence import aggregate_call_experience, as_payload, persist_turn_intelligence
+from app.services.sales_intelligence import aggregate_call_sales_intelligence, as_payload as sales_as_payload, persist_turn_sales_intelligence
 from app.schemas.voice_session import VoiceSessionCreate, VoiceSessionOut, VoiceSessionStatusOut
 
 router = APIRouter(prefix="/voice/sessions")
 logger = logging.getLogger(__name__)
+
+
+def _opening_instruction_from_frozen_nodes(nodes: list[dict]) -> str | None:
+    """Use the frozen opening, but skip markdown headings from plain-text uploads."""
+    opening = next((str(node.get("prompt", "")).strip() for node in nodes if isinstance(node, dict) and node.get("type") == "opening"), "")
+    # Plain-text section parsing can make a document title the formal opening.
+    # Only in that malformed-heading case select the first actual spoken
+    # greeting already present in the same immutable snapshot.
+    if opening and not opening.lstrip().startswith("#"):
+        return opening
+    for node in nodes:
+        prompt = str(node.get("prompt", "")).strip() if isinstance(node, dict) else ""
+        if re.match(r"^(?:hello|hi|good\s+(?:morning|afternoon|evening))\b", prompt, re.I):
+            return prompt
+    return opening or None
 
 
 def _mark_worker_failure(call: Call, session: VoiceSession, db: Session) -> None:
@@ -35,6 +53,8 @@ def _mark_worker_failure(call: Call, session: VoiceSession, db: Session) -> None
         call.status = "disconnected"
         call.completed_at = session.ended_at
     db.commit()
+    aggregate_call_experience(db, call)
+    aggregate_call_sales_intelligence(db, call)
 
 
 def _require_worker_secret(value: str | None) -> None:
@@ -74,13 +94,13 @@ def _start_worker(call: Call, session: VoiceSession, db: Session) -> None:
             headers=worker_headers, timeout=5,
         )
         capability_response.raise_for_status()
-        if capability_response.json().get("worker_api_version") != "module-3b-context-v1":
-            raise ValueError("worker does not support the Module 3B campaign-context contract")
+        if capability_response.json().get("worker_api_version") != "module-5-sales-context-v1":
+            raise ValueError("worker does not support the Module 5 campaign-context contract")
     except (httpx.HTTPError, ValueError, TypeError) as error:
         _mark_worker_failure(call, session, db)
         raise HTTPException(
             status_code=503,
-            detail="Voice worker is outdated. Start the vendored EchoAI/VoicePipeline worker with Module 3B support.",
+            detail="Voice worker is outdated. Restart the vendored EchoAI/VoicePipeline worker with Module 5 support.",
         ) from error
     campaign = db.query(Campaign).filter(Campaign.id == call.campaign_id).first()
     logger.info("event=voice_worker_start call_id=%s campaign_id=%s agent_id=%s room_name=%s", call.id, call.campaign_id, call.agent_id, session.room_name)
@@ -92,7 +112,7 @@ def _start_worker(call: Call, session: VoiceSession, db: Session) -> None:
             snapshot = json.loads(campaign.script_snapshot_json or "{}")
             nodes = json.loads(snapshot.get("content", "{}"))
             nodes = nodes.get("nodes", []) if isinstance(nodes, dict) else nodes
-            opening_instruction = next((node.get("prompt") for node in nodes if isinstance(node, dict) and node.get("type") == "opening"), None)
+            opening_instruction = _opening_instruction_from_frozen_nodes(nodes)
         except (TypeError, ValueError, json.JSONDecodeError):
             opening_instruction = None
     # Active campaigns freeze persona behavior at activation.  Older campaigns
@@ -104,8 +124,8 @@ def _start_worker(call: Call, session: VoiceSession, db: Session) -> None:
             persona_snapshot = parsed_persona if isinstance(parsed_persona, dict) else {}
         except (TypeError, ValueError, json.JSONDecodeError):
             persona_snapshot = {}
+    persona_name = str(persona_snapshot.get("name") or persona_snapshot.get("display_name") or (persona.name if persona else "EchoAI"))
     if persona_snapshot or persona:
-        persona_name = str(persona_snapshot.get("name") or (persona.name if persona else "EchoAI"))
         persona_tone = str(persona_snapshot.get("tone") or (persona.tone if persona else "professional"))
         persona_description = str(persona_snapshot.get("description") or (persona.description if persona else ""))
         persona_payload = {
@@ -115,6 +135,11 @@ def _start_worker(call: Call, session: VoiceSession, db: Session) -> None:
             "tts": {"provider": "deepgram", "voice": "aura-2-asteria-en", "speech_rate": 1.0},
             "llm": {"temperature": 0.45},
         }
+    if opening_instruction:
+        # Authoring tools vary in placeholder casing and braces. Resolve every
+        # agent/name placeholder before it crosses the worker/TTS boundary.
+        opening_instruction = re.sub(r"\[\s*(?:your\s+)?name\s*\]", persona_name, opening_instruction, flags=re.I)
+        opening_instruction = re.sub(r"\{\{?\s*(?:agent[_\s-]*)?name\s*\}?\}", persona_name, opening_instruction, flags=re.I)
     try:
         response = httpx.post(
             f"{settings.voice_worker_url}/api/internal/sessions/start",
@@ -163,13 +188,38 @@ def persist_live_customer_turn(call_id: str, payload: dict, x_echoai_voice_secre
     if requested_next_node_id is not None:
         requested_next_node_id = str(requested_next_node_id)
     try:
-        _turn, transition, duplicate = persist_customer_turn(
+        turn, transition, duplicate = persist_customer_turn(
             db, call, text=text, worker_turn_id=worker_turn_id,
             requested_next_node_id=requested_next_node_id,
         )
     except ValueError as error:
+        logger.warning("event=campaign_context_rejected call_id=%s turn_id=%s reason=%s", call_id, worker_turn_id, str(error))
         raise HTTPException(status_code=409, detail=str(error)) from error
-    context = call_context(db, call)
+    cognitive = None
+    sales = None
+    try:
+        insight, _cognitive_duplicate = persist_turn_intelligence(db, call, turn, payload.get("acoustic"))
+        cognitive = as_payload(insight)
+    except Exception:
+        logger.warning("event=cognitive_inference_failed call_id=%s worker_turn_id=%s", call.id, worker_turn_id)
+    try:
+        from app.api.routes.operations import _retrieve_knowledge
+        knowledge = _retrieve_knowledge(db, call.campaign_id, text)
+        sales_insight, _sales_duplicate = persist_turn_sales_intelligence(db, call, turn, insight if cognitive else None, knowledge)
+        sales = sales_as_payload(sales_insight)
+    except Exception:
+        logger.warning("event=sales_inference_failed call_id=%s worker_turn_id=%s", call.id, worker_turn_id)
+    try:
+        context = call_context(db, call)
+    except ValueError as error:
+        logger.error("event=campaign_context_unavailable call_id=%s turn_id=%s reason=%s", call_id, worker_turn_id, str(error))
+        raise HTTPException(status_code=409, detail="Frozen campaign context is unavailable for this active call") from error
+    logger.info(
+        "event=campaign_context_returned call_id=%s turn_id=%s node_id=%s history_count=%s duplicate=%s",
+        call_id, worker_turn_id, (context.get("current_node") or {}).get("id"), len(context.get("history") or []), duplicate,
+    )
+    context["cognitive"] = cognitive
+    context["sales"] = sales
     context["stage_transition"] = {
         "advanced": transition.advanced,
         "previous_node_id": transition.previous_node_id,
@@ -266,6 +316,8 @@ def get_live_voice_session(call_id: str, after: int = 0, db: Session = Depends(g
                 session.status = "ended"
                 session.ended_at = call.completed_at or utcnow()
             db.commit()
+            aggregate_call_experience(db, call)
+            aggregate_call_sales_intelligence(db, call)
             raise HTTPException(status_code=409, detail="The voice worker session ended unexpectedly; the call was closed safely")
         response.raise_for_status()
         return response.json()
@@ -291,6 +343,8 @@ def end_voice_session(call_id: str, db: Session = Depends(get_db), user: User = 
         session.status = "ended"
         session.ended_at = utcnow()
     db.commit()
+    aggregate_call_experience(db, call)
+    aggregate_call_sales_intelligence(db, call)
     _end_worker(call_id)
     if not session:
         return VoiceSessionStatusOut(id="", call_id=call.id, room_name="", status="ended")

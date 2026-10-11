@@ -50,6 +50,7 @@ class TurnResponse(BaseModel):
     suggested_reply: str | None
     escalation: dict | None
     retrieval_context: list[dict] = []
+    cognitive: dict | None = None
     llm_prompt: str
 
 

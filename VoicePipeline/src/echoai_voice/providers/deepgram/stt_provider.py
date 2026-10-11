@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 from contextlib import suppress
 import logging
 from typing import Any
@@ -39,6 +40,7 @@ from echoai_voice.services.transcript_event_bus import TranscriptEventBus
 from echoai_voice.services.whisper_fallback import WhisperFallbackService
 from echoai_voice.services.latency_tracker import LatencyTracker
 from echoai_voice.models.latency import LatencyCheckpointName
+from echoai_voice.services.acoustic_cues import extract_pcm16_cues
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +250,11 @@ class DeepgramStreamingSttProvider:
             self._pending_fallback_turns.add(key)
             self._schedule_fallback_if_needed(event)
             return
+        # This bounded calculation uses only the inbound customer PCM already
+        # retained for STT fallback. It does not wait for providers or alter
+        # the STT -> Groq scheduling path.
+        cues = extract_pcm16_cues(bytes(self._turn_audio), self.config.sample_rate_hz, self.config.channels, event.text)
+        event = replace(event, acoustic={"available": cues.available, "energy": cues.energy, "zero_crossing_rate": cues.zero_crossing_rate, "speaking_rate_wpm": cues.speaking_rate_wpm, "cue": cues.cue})
         self._published_final_turns.add(key)
         await self.transcript_bus.publish(event)
 

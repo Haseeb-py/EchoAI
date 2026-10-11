@@ -327,19 +327,33 @@ class VoiceUiController:
                 async with httpx.AsyncClient(timeout=4) as client:
                     response = await client.post(
                         f"{self.settings.echoai_backend_url}/api/voice/sessions/internal/{self._call_id}/customer-turn",
-                        json={"text": event.text, "turn_id": event.turn_id},
+                        json={"text": event.text, "turn_id": event.turn_id, "acoustic": event.acoustic or {}},
                         headers={"X-EchoAI-Voice-Secret": self.settings.echoai_internal_voice_secret},
                     )
                     response.raise_for_status()
                     context = response.json()
+                    if not isinstance(context.get("campaign"), dict):
+                        raise ValueError("backend returned no campaign context")
                     self._publish("script_context", context)
+                    cognitive = context.get("cognitive")
+                    if isinstance(cognitive, dict):
+                        self._publish("cognitive", cognitive)
+                    sales = context.get("sales")
+                    if isinstance(sales, dict):
+                        self._publish("sales", sales)
                     return context
-            except (httpx.HTTPError, ValueError, TypeError):
+            except httpx.HTTPStatusError as error:
+                status_code = error.response.status_code if error.response is not None else "unknown"
                 logger.warning(
-                    "event=campaign_context_request_failed call_id=%s attempt=%s",
-                    self._call_id, attempt + 1,
+                    "event=campaign_context_request_failed call_id=%s turn_id=%s attempt=%s status=%s",
+                    self._call_id, event.turn_id, attempt + 1, status_code,
                 )
-        self._publish("error", {"message": "Unable to access approved campaign context"})
+            except (httpx.HTTPError, ValueError, TypeError) as error:
+                logger.warning(
+                    "event=campaign_context_request_failed call_id=%s turn_id=%s attempt=%s reason=%s",
+                    self._call_id, event.turn_id, attempt + 1, type(error).__name__,
+                )
+        self._publish("error", {"message": "Approved campaign context could not be loaded; no AI reply was generated."})
         return None
 
     def _on_response(self, event: GeneratedResponseEvent) -> None:

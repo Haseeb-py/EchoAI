@@ -42,13 +42,18 @@ class PostCallAnalysis(BaseModel):
     follow_up_recommendation: str
 
 
-def _require_config() -> None:
-    if not settings.deepgram_api_key or not settings.groq_api_key:
-        raise VoiceProviderError("Temporary voice pipeline is not configured")
+def _require_groq_config() -> None:
+    if not settings.groq_api_key:
+        raise VoiceProviderError("Groq is not configured")
+
+
+def _require_deepgram_config() -> None:
+    if not settings.deepgram_api_key:
+        raise VoiceProviderError("Deepgram is not configured")
 
 
 async def transcribe_audio(audio: bytes, content_type: str) -> str:
-    _require_config()
+    _require_deepgram_config()
     headers = {"Authorization": f"Token {settings.deepgram_api_key}", "Content-Type": content_type}
     async with httpx.AsyncClient(timeout=45) as client:
         response = await client.post(
@@ -65,7 +70,7 @@ async def transcribe_audio(audio: bytes, content_type: str) -> str:
 
 
 async def generate_reply(prompt: str) -> str:
-    _require_config()
+    _require_groq_config()
     payload = {"model": settings.groq_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 220}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post("https://api.groq.com/openai/v1/chat/completions", headers={"Authorization": f"Bearer {settings.groq_api_key}"}, json=payload)
@@ -78,7 +83,7 @@ async def generate_reply(prompt: str) -> str:
 
 
 async def synthesize_audio(text: str) -> str:
-    _require_config()
+    _require_deepgram_config()
     headers = {"Authorization": f"Token {settings.deepgram_api_key}", "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=45) as client:
         response = await client.post("https://api.deepgram.com/v1/speak?model=aura-2-thalia-en&encoding=mp3", headers=headers, json={"text": text})
@@ -88,7 +93,34 @@ async def synthesize_audio(text: str) -> str:
 
 
 async def analyze_call(prompt: str) -> dict:
-    raw = await generate_reply(prompt)
+    # Analysis is structured data, not a short conversational reply. Reusing
+    # generate_reply's 220-token limit was causing valid calls to fall back to
+    # "analysis unavailable" when Groq truncated the required JSON fields.
+    _require_groq_config()
+    payload = {
+        "model": settings.groq_model,
+        "messages": [
+            {"role": "system", "content": "Return exactly one JSON object. Do not use Markdown or commentary."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 850,
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {settings.groq_api_key}"}, json=payload,
+            )
+    except httpx.HTTPError as error:
+        raise VoiceProviderError("Groq post-call analysis request failed") from error
+    if response.is_error:
+        raise VoiceProviderError(f"Groq post-call analysis failed ({response.status_code})")
+    try:
+        raw = response.json()["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError) as error:
+        raise VoiceProviderError("Groq returned an unreadable post-call analysis") from error
     return parse_analysis_response(raw)
 
 

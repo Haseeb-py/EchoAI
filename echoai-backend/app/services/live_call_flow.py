@@ -20,6 +20,8 @@ from app.models.operations import Call, CallState, CallTurn
 from app.models.script import Script
 from app.core.time import utcnow
 from app.models.voice_turn_receipt import VoiceTurnReceipt
+from app.services.cognitive_intelligence import as_payload, latest_turn_intelligence
+from app.services.sales_intelligence import as_payload as sales_as_payload, latest_turn_sales_intelligence
 
 
 _CLARIFICATION_PREFIXES = (
@@ -187,6 +189,8 @@ def call_context(db: Session, call: Call) -> dict:
     latest_customer_text = next((item["text"] for item in reversed(history) if item["speaker"] == "customer"), "")
     knowledge = _retrieve_knowledge(db, campaign.id, latest_customer_text)
     objection = _match_objection(db, campaign.script_id, state.current_node_id, latest_customer_text)
+    latest_intelligence = latest_turn_intelligence(db, call.id)
+    latest_sales = latest_turn_sales_intelligence(db, call.id)
     return {
         "campaign": {"product": campaign.product, "audience": campaign.audience, "goal": campaign.goal, "context": campaign.context},
         "current_node": current,
@@ -196,6 +200,8 @@ def call_context(db: Session, call: Call) -> dict:
         "opening_delivered": db.query(VoiceTurnReceipt).filter_by(
             call_id=call.id, speaker="ai", worker_turn_id="0",
         ).first() is not None,
+        "cognitive": as_payload(latest_intelligence) if latest_intelligence else None,
+        "sales": sales_as_payload(latest_sales) if latest_sales else None,
     }
 
 

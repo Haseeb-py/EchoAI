@@ -18,6 +18,7 @@ class TranscriptEvent:
     confidence: float
     timestamp_start: datetime
     timestamp_end: datetime
+    acoustic: dict[str, object] | None = None
 
     def model_dump(self) -> dict[str, object]:
         """Return a JSON-ready event payload matching the module schema."""
@@ -31,4 +32,5 @@ class TranscriptEvent:
             "confidence": self.confidence,
             "timestamp_start": self.timestamp_start.isoformat(),
             "timestamp_end": self.timestamp_end.isoformat(),
+            "acoustic": self.acoustic,
         }

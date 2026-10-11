@@ -17,6 +17,8 @@ from app.api.deps import get_current_user, get_db, require_admin
 from app.models.campaign import Campaign
 from app.models.operations import Call, CallState, CallTurn, EscalationAlert, EscalationEvent, KnowledgeEntry, Lead, ObjectionEntry, SupervisorMessage
 from app.models.voice_session import VoiceSession
+from app.models.cognitive import CallExperience, TurnIntelligence
+from app.models.sales import CallSalesSummary, TurnSalesIntelligence
 from app.models.script import Script
 from app.models.user import User
 from app.models.system_setting import SystemSetting
@@ -24,6 +26,8 @@ from app.api.routes.system_settings import SETTING_ID
 from app.core.time import utcnow
 from app.core.config import settings
 from app.services.live_call_flow import script_nodes, transition_customer_stage
+from app.services.cognitive_intelligence import aggregate_call_experience, as_payload, persist_turn_intelligence
+from app.services.sales_intelligence import aggregate_call_sales_intelligence, as_payload as sales_as_payload, persist_turn_sales_intelligence
 from app.schemas.operations import (
     CallAnalysisPrompt,
     CallComplete,
@@ -323,6 +327,8 @@ def recover_orphaned_call(call_id: str, db: Session = Depends(get_db), user: Use
         session.status = "ended"
         session.ended_at = call.completed_at
     db.commit()
+    aggregate_call_experience(db, call)
+    aggregate_call_sales_intelligence(db, call)
     return {"id": call.id, "status": call.status, "recovered": True}
 
 
@@ -346,8 +352,22 @@ def ingest_turn(call_id: str, payload: TurnCreate, db: Session = Depends(get_db)
     if not previous_turn and payload.sequence not in {0, 1}:
         raise HTTPException(status_code=422, detail="The first turn sequence must be 0 or 1")
     nodes = script_nodes(campaign, db) if campaign else []
-    db.add(CallTurn(id=str(uuid4()), call_id=call_id, sequence=payload.sequence, speaker=payload.speaker,
-                    transcript=payload.transcript, occurred_at=payload.occurred_at or utcnow()))
+    turn = CallTurn(id=str(uuid4()), call_id=call_id, sequence=payload.sequence, speaker=payload.speaker,
+                    transcript=payload.transcript, occurred_at=payload.occurred_at or utcnow())
+    db.add(turn)
+    cognitive = None
+    sales = None
+    if payload.speaker == "customer" and payload.is_final:
+        try:
+            insight, _duplicate = persist_turn_intelligence(db, call, turn, commit=False)
+            cognitive = as_payload(insight)
+        except Exception:
+            logger.warning("event=cognitive_inference_failed call_id=%s turn_id=%s", call.id, turn.id)
+        try:
+            sales_insight, _sales_duplicate = persist_turn_sales_intelligence(db, call, turn, insight if cognitive else None, commit=False)
+            sales = sales_as_payload(sales_insight)
+        except Exception:
+            logger.warning("event=sales_inference_failed call_id=%s turn_id=%s", call.id, turn.id)
     memory = json.loads(state.recent_memory_json or "[]")
     memory.append({"speaker": payload.speaker, "text": payload.transcript})
     state.recent_memory_json = json.dumps(memory[-8:])
@@ -384,8 +404,10 @@ def ingest_turn(call_id: str, payload: TurnCreate, db: Session = Depends(get_db)
                         approved_objection_response=objection.approved_response if objection else None,
                         suggested_reply=fallback_reply,
                         escalation={"id": alert.id, "reason": alert.reason, "severity": alert.severity} if alert else None,
-                        retrieval_context=knowledge,
-                        llm_prompt=_turn_prompt(campaign, current_node, memory, knowledge, objection))
+                        retrieval_context=knowledge, cognitive=cognitive,
+                        llm_prompt=_turn_prompt(campaign, current_node, memory, knowledge, objection) + (
+                            f"\n\nCOGNITIVE TONE GUIDANCE: {cognitive['response_guidance']}" if cognitive else ""
+                        ) + (f"\n\nSALES STRATEGY: {sales['recommended_strategy']}" if sales else ""))
 
 
 @router.post("/calls/{call_id}/controls")
@@ -498,6 +520,8 @@ def complete_call(call_id: str, payload: CallComplete, db: Session = Depends(get
             lead.summary = payload.summary
             lead.status = "converted" if payload.outcome.lower() in {"converted", "conversion", "won"} else "follow_up"
     db.commit()
+    aggregate_call_experience(db, call)
+    aggregate_call_sales_intelligence(db, call)
     return {"id": call.id, "status": call.status, "outcome": call.outcome, "completed_at": call.completed_at}
 
 
@@ -507,10 +531,27 @@ def get_call(call_id: str, db: Session = Depends(get_db), user: User = Depends(g
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
     _require_call_read_access(call, user)
+    # A terminal call must never look silently unanalyzed. Do not invoke Groq
+    # on a read (which could duplicate analysis); retain an explicit recovery
+    # message until the authorized completion-analysis endpoint is retried.
+    if call.status == "completed" and not call.summary:
+        call.summary = "Call completed; post-call analysis was not recorded. Retry completion analysis if provider access is restored."
+        db.commit()
     turns = db.query(CallTurn).filter(CallTurn.call_id == call_id).order_by(CallTurn.sequence).all()
     state = db.query(CallState).filter(CallState.call_id == call_id).first()
     campaign = db.query(Campaign).filter(Campaign.id == call.campaign_id).first()
     lead = db.query(Lead).filter(Lead.id == call.lead_id).first() if call.lead_id else None
+    experience = db.get(CallExperience, call.id)
+    intelligence = db.query(TurnIntelligence).filter(TurnIntelligence.call_id == call.id).order_by(TurnIntelligence.created_at).all()
+    sales_summary = db.get(CallSalesSummary, call.id)
+    sales_intelligence = db.query(TurnSalesIntelligence).filter(TurnSalesIntelligence.call_id == call.id).order_by(TurnSalesIntelligence.created_at).all()
+    # Calls completed by an older worker/lifecycle path can legitimately have
+    # persisted per-turn intelligence but no aggregate. Backfill from those
+    # immutable rows on detail read; this is idempotent and never alters turns.
+    if not experience and intelligence:
+        experience = aggregate_call_experience(db, call)
+    if not sales_summary and sales_intelligence:
+        sales_summary = aggregate_call_sales_intelligence(db, call)
     return {"id": call.id, "campaign_id": call.campaign_id, "campaign_name": campaign.name if campaign else "Unknown campaign",
             "lead_id": call.lead_id, "lead_name": lead.name if lead else "Unknown lead", "agent_id": call.agent_id, "status": call.status,
             "outcome": call.outcome, "summary": call.summary, "analysis": json.loads(call.analysis_json or "{}"),
@@ -522,7 +563,20 @@ def get_call(call_id: str, db: Session = Depends(get_db), user: User = Depends(g
             "is_held": state.is_held if state else False,
             "takeover_actor_id": state.takeover_actor_id if state else None,
             "turns": [{"sequence": item.sequence, "speaker": item.speaker, "transcript": item.transcript,
-                       "occurred_at": item.occurred_at} for item in turns]}
+                       "occurred_at": item.occurred_at} for item in turns],
+            "cognitive": {
+                "customer_experience": experience.customer_experience,
+                "start_sentiment": experience.start_sentiment, "end_sentiment": experience.end_sentiment,
+                "overall_sentiment": experience.overall_sentiment, "primary_intent": experience.primary_intent,
+                "dominant_emotion": experience.dominant_emotion, "customer_turn_count": experience.customer_turn_count,
+            } if experience else None,
+            "intelligence_timeline": [as_payload(item) for item in intelligence],
+            "sales": {"objection_count": sales_summary.objection_count,
+                      "primary_objection": sales_summary.primary_objection,
+                      "buying_signal_count": sales_summary.buying_signal_count,
+                      "highest_buying_signal": sales_summary.highest_buying_signal,
+                      "commitment_confirmed": sales_summary.commitment_confirmed} if sales_summary else None,
+            "sales_timeline": [sales_as_payload(item) for item in sales_intelligence]}
 
 
 @router.get("/calls")
@@ -552,11 +606,24 @@ def list_calls(status_filter: str | None = None, campaign_id: str | None = None,
     for turn in turns:
         latest_turn_map.setdefault(turn.call_id, turn)
     alert_map = {alert.call_id: alert for alert in alerts}
+    experiences = db.query(CallExperience).filter(CallExperience.call_id.in_(call_ids)).all() if call_ids else []
+    experience_map = {item.call_id: item for item in experiences}
+    sales_summaries = db.query(CallSalesSummary).filter(CallSalesSummary.call_id.in_(call_ids)).all() if call_ids else []
+    sales_map = {item.call_id: item for item in sales_summaries}
     return [
         {"id": call.id, "campaign_id": call.campaign_id, "campaign_name": campaign_names.get(call.campaign_id, "Unknown campaign"),
          "lead_id": call.lead_id, "lead_name": lead_names.get(call.lead_id, "Unknown lead"), "agent_id": call.agent_id, "status": call.status,
          "outcome": call.outcome, "summary": call.summary, "analysis": json.loads(call.analysis_json or "{}"),
          "follow_up_recommendation": call.follow_up_recommendation, "started_at": call.started_at, "completed_at": call.completed_at,
+         "cognitive": {"customer_experience": experience_map[call.id].customer_experience,
+                       "overall_sentiment": experience_map[call.id].overall_sentiment,
+                       "primary_intent": experience_map[call.id].primary_intent,
+                       "dominant_emotion": experience_map[call.id].dominant_emotion} if call.id in experience_map else None,
+         "sales": {"objection_count": sales_map[call.id].objection_count,
+                   "primary_objection": sales_map[call.id].primary_objection,
+                   "buying_signal_count": sales_map[call.id].buying_signal_count,
+                   "highest_buying_signal": sales_map[call.id].highest_buying_signal,
+                   "commitment_confirmed": sales_map[call.id].commitment_confirmed} if call.id in sales_map else None,
          "current_node_id": state_map.get(call.id).current_node_id if call.id in state_map else None,
          "is_muted": state_map.get(call.id).is_muted if call.id in state_map else False,
          "is_held": state_map.get(call.id).is_held if call.id in state_map else False,

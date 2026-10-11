@@ -20,7 +20,10 @@ STATIC_DIR = Path(__file__).with_name("static")
 controller = VoiceUiController()
 managed_controllers: dict[str, VoiceUiController] = {}
 logger = logging.getLogger(__name__)
-WORKER_API_VERSION = "module-3b-context-v1"
+# The backend checks this at every managed-call start. Bumping it prevents an
+# already-running pre-Module-4 worker on port 8081 from silently serving new
+# calls without the diagnostic campaign-context behaviour.
+WORKER_API_VERSION = "module-5-sales-context-v1"
 
 
 class PersonaSelection(BaseModel):

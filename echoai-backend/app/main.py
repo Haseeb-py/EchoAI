@@ -13,6 +13,8 @@ from app.models import security as security_model  # noqa: F401
 from app.models import system_setting as system_setting_model  # noqa: F401
 from app.models import voice_session as voice_session_model  # noqa: F401
 from app.models import voice_turn_receipt as voice_turn_receipt_model  # noqa: F401
+from app.models import cognitive as cognitive_model  # noqa: F401
+from app.models import sales as sales_model  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
 
@@ -63,6 +65,11 @@ def ensure_operational_columns():
             "is_held": "BOOLEAN DEFAULT 0",
             "takeover_actor_id": "VARCHAR(36)",
         },
+        "turn_intelligence": {
+            "acoustic_json": "TEXT DEFAULT '{}'",
+            "fused_emotion": "VARCHAR(32) DEFAULT 'unknown'",
+        },
+        "turn_sales_intelligence": {"objection_types_json": "TEXT DEFAULT '[]'", "upsell_json": "TEXT DEFAULT '[]'"},
         "call_states": {
             "is_muted": "BOOLEAN DEFAULT 0",
             "is_held": "BOOLEAN DEFAULT 0",
